@@ -1,4 +1,4 @@
-# Webget — quick developer commands
+# Webget - quick developer commands
 
 .PHONY: install dev test lint fmt clean
 

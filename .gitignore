@@ -1,4 +1,4 @@
-# Secrets & credentials — never commit these
+# Secrets & credentials - never commit these
 *.pem
 *.key
 *.crt
