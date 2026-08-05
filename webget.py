@@ -818,6 +818,29 @@ def _domain_match(cookie_domain, host):
     return d == h or h.endswith("." + d)
 
 
+def _cookie_belongs_to(cookie_domain, host):
+    """True if cookie_domain is host itself or a subdomain of host.
+
+    Used for logout pruning: logging out 'campus.example' must also clear
+    cookies from '.api.campus.example' (subdomains), while keeping
+    'github.com' untouched.
+    """
+    d = (cookie_domain or "").lstrip(".").lower()
+    h = host.lower()
+    return d == h or d.endswith("." + h)
+
+
+def _logout_domain_regex(host):
+    """Regex matching host plus subdomains for Playwright clear_cookies.
+
+    Matches 'campus.example', '.campus.example', 'api.campus.example',
+    '.api.campus.example' but never 'github.com' or 'notevil.com'.
+    """
+    import re
+
+    return re.compile(r"^(\.)?([^.]+\.)*" + re.escape(host) + r"$")
+
+
 async def _logout_flow(site, profile):
     from playwright.async_api import async_playwright
 
@@ -831,7 +854,7 @@ async def _logout_flow(site, profile):
         try:
             state = await asyncio.to_thread(_read_json, state_p)
             cookies = state.get("cookies") or []
-            kept = [c for c in cookies if not _domain_match(c.get("domain", ""), host)]
+            kept = [c for c in cookies if not _cookie_belongs_to(c.get("domain", ""), host)]
             removed = len(cookies) - len(kept)
             state["cookies"] = kept
             await asyncio.to_thread(_write_json, state_p, state)
@@ -843,11 +866,17 @@ async def _logout_flow(site, profile):
             user_data_dir=profile_dir(profile), headless=True
         )
         try:
-            await context.clear_cookies()
+            # Read cookies BEFORE clearing so we can report accurately.
             all_cookies = await context.cookies()
-            keep = [c for c in all_cookies if not _domain_match(c.get("domain", ""), host)]
-            removed += len(all_cookies) - len(keep)
-            await context.add_cookies(keep)
+            before = len(all_cookies)
+            # Playwright's clear_cookies accepts a regex domain filter. We
+            # match host itself plus subdomains (leading-dot cookies like
+            # '.campus.example' and '.api.campus.example'), while never
+            # touching unrelated domains. No global clear: session cookies
+            # survive because we never remove them.
+            await context.clear_cookies(domain=_logout_domain_regex(host))
+            after_cookies = await context.cookies()
+            removed += before - len(after_cookies)
         except Exception as e:  # noqa: BLE001 - warn, still done
             _warn(f"could not clear browser cookies for {host}: {e}")
         await context.close()

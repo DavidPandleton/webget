@@ -366,3 +366,29 @@ class TestLogoutPrune:
             c for c in state["cookies"] if not webget._domain_match(c.get("domain", ""), "nope.com")
         ]
         assert len(kept) == 3
+
+    def test_browser_context_preserves_unrelated_domains(self):
+        # Regression for issue #5: the old code cleared ALL cookies before
+        # reading them back, so unrelated domains were lost. The fix uses a
+        # domain-scoped regex in clear_cookies(domain=...), never a global
+        # clear. Verify the regex matches only the target + subdomains.
+        pat = webget._logout_domain_regex("campus.example")
+        cases = {
+            "campus.example": True,
+            ".campus.example": True,
+            "api.campus.example": True,
+            ".api.campus.example": True,
+            "github.com": False,
+            "other.example": False,
+            "notevil.com": False,
+            "campus.example.evil.com": False,
+        }
+        for domain, expected in cases.items():
+            assert bool(pat.match(domain)) == expected, f"{domain}: expected {expected}"
+
+    def test_cookie_belongs_to_subdomain(self):
+        assert webget._cookie_belongs_to(".api.campus.example", "campus.example")
+        assert webget._cookie_belongs_to(".campus.example", "campus.example")
+        assert webget._cookie_belongs_to("campus.example", "campus.example")
+        assert not webget._cookie_belongs_to("github.com", "campus.example")
+        assert not webget._cookie_belongs_to("notevil.com", "evil.com")
