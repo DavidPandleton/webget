@@ -24,7 +24,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest ruff
       - name: Lint
-        run: ruff check webget.py tests
+        run: ruff check webget_cli.py tests
       - name: Test
         run: pytest
 
@@ -43,5 +43,5 @@ jobs:
       - name: Smoke test
         run: |
           webget --help | head -20
-          python -c "import webget; print('import ok')"
+          python -c "import webget_cli; print('import ok')"
           webget s "test" --limit 3 | head -4

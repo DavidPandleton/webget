@@ -16,7 +16,7 @@ pip install -e ".[dev]"
 pytest
 
 # lint
-ruff check webget.py tests
+ruff check webget_cli.py tests
 ```
 
 Runtime deps (crawl4ai, ddgs, httpx, trafilatura, html2text) are only needed
@@ -47,7 +47,7 @@ closed. The tool's job is to report honestly what it hit
 ## Before opening a PR
 
 1. `pytest` passes.
-2. `ruff check webget.py tests` passes.
+2. `ruff check webget_cli.py tests` passes.
 3. Smoke test your change: `webget s "test"` and
    `webget fetch https://example.com --json`.
 4. Grep your diff for accidental secrets: `git diff | grep -iE "cookie|token|key="`.

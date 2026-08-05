@@ -10,6 +10,7 @@ Firecrawl), and reports *provenance* - where the content came from and whether
 the session that fetched it can be trusted.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/DavidPandleton/webget/ci.yml?label=CI&logo=github)](https://github.com/DavidPandleton/webget/actions)
+[![PyPI](https://img.shields.io/pypi/v/webget-cli.svg)](https://pypi.org/project/webget-cli/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/DavidPandleton/webget?style=social)](https://github.com/DavidPandleton/webget)
@@ -36,16 +37,50 @@ anti-bot systems; it tells you honestly what happened.
 
 ## Install
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.11+.
+
+### PyPI (`webget-cli`)
+
+The CLI command is `webget`; the PyPI package name is `webget-cli`
+(the bare `webget` name is taken by an unrelated package).
 
 ```bash
-# from the repo
-uv pip install --python $(which python3) crawl4ai ddgs httpx trafilatura html2text
-cp webget.py ~/.local/bin/webget
-chmod +x ~/.local/bin/webget
+# pip - HTTP fast path + search only (no browser)
+pip install webget-cli
 
-# or install as a package
-uv pip install -e .
+# pip - full stack with Crawl4AI/Playwright browser fallback
+pip install "webget-cli[browser]"
+
+# uv tool - isolated executable on your PATH
+uv tool install webget-cli --with "webget-cli[browser]"
+```
+
+After install, `webget` is available as a command:
+
+```bash
+webget --help
+```
+
+### Browser runtime (optional)
+
+Crawl4AI drives a Playwright Chromium. `pip install "webget-cli[browser]"`
+installs the Python packages; the browser binary itself is downloaded
+separately:
+
+```bash
+python -m playwright install chromium
+```
+
+Without the browser extra, `webget` still works for search and plain HTTP
+fetches. A fetch that needs the browser (JS rendering, `--profile` sessions,
+`login`) prints a clear warning telling you how to install it.
+
+### From source (development)
+
+```bash
+git clone https://github.com/DavidPandleton/webget
+cd webget
+uv pip install -e ".[dev,browser]"
 ```
 
 ## Usage
@@ -151,7 +186,7 @@ make test       # pytest (pure logic, no network needed)
 make lint       # ruff
 ```
 
-- Single-file Python (`webget.py`), no build step, runs via `uv run`.
+- Single-file Python (`webget_cli.py`), no build step, runs via `uv run`.
 - Lazy imports: `--strategy http` never pays the Crawl4AI import cost.
 - Crawl4AI 0.9.2's `export_storage_state()` is broken (wrong attribute);
   webget works around it by reaching into `browser_manager` directly.

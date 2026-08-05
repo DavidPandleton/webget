@@ -1,12 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "webget"
-version = "0.5.0"
-description = "Local search + scrape CLI with an HTTP fast path, Crawl4AI fallback, and authenticated session profiles. Zero API keys."
+name = "webget-cli"
+version = "0.6.0"
+description = "Local search + scrape CLI with an HTTP fast path, optional browser fallback, and authenticated session profiles. Zero API keys."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "David Tarigan", email = "tarigansdavid@gmail.com" }]
-keywords = ["scraping", "crawling", "cli", "search", "crawl4ai", "duckduckgo", "playwright"]
+keywords = ["scraping", "crawling", "cli", "search", "duckduckgo", "http"]
 classifiers = [
     "Environment :: Console",
     "Intended Audience :: Developers",
@@ -14,24 +18,30 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Internet :: WWW/HTTP",
 ]
 dependencies = [
-    "crawl4ai>=0.9",
     "ddgs",
     "httpx",
     "trafilatura",
     "html2text",
 ]
 
-[project.scripts]
-webget = "webget:main"
+[project.urls]
+Homepage = "https://github.com/DavidPandleton/webget"
+Repository = "https://github.com/DavidPandleton/webget"
+Changelog = "https://github.com/DavidPandleton/webget/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
+browser = ["crawl4ai>=0.9"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
+[project.scripts]
+webget = "webget_cli:main"
+
 [tool.setuptools]
-py-modules = ["webget"]
+py-modules = ["webget_cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

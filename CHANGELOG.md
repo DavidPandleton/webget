@@ -5,6 +5,27 @@ All notable changes to webget are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-05
+
+### Added
+- Packaging readiness for PyPI:
+  - PyPI package renamed to `webget-cli` (bare `webget` is taken by an
+    unrelated package); CLI command stays `webget`.
+  - `browser` optional extra: Crawl4AI/Playwright no longer installed by
+    default. `pip install webget-cli[browser]` or
+    `uv tool install webget-cli --with webget-cli[browser]`.
+  - Clear error when the browser strategy is requested but Crawl4AI is not
+    installed (HTTP fast path and search keep working without it).
+  - Build metadata: `[project.urls]`, Python 3.13 classifier, `build-system`
+    declaration.
+- README installation section: pip, uv tool, browser runtime setup.
+
+### Fixed
+- Logout now removes cookies only for the target domain and its subdomains,
+  preserving unrelated domains in the same profile (issue #5). Uses a
+  domain-scoped regex with Playwright `clear_cookies(domain=...)` instead of
+  a global clear.
+
 ## [0.5.0] - 2026-08-05
 
 ### Added

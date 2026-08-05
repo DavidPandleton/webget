@@ -538,47 +538,59 @@ async def scrape_many(
 
     # Pass 2: Crawl4AI browser - only launched if something still needs it.
     if pending and "crawl4ai" in steps:
-        from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+        try:
+            from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+        except ImportError:
+            _warn(
+                "crawl4ai is not installed; install it with "
+                "'pip install webget-cli[browser]' or 'uv tool install "
+                "webget-cli --with webget-cli[browser]'"
+            )
+            for url in pending:
+                reasons[url].append(("error", "crawl4ai", "crawl4ai not installed"))
+            pending = []
+            # Fall through to terminal state below.
 
-        bc = BrowserConfig(
-            use_persistent_context=bool(profile),
-            user_data_dir=profile_dir(profile) if profile else None,
-            cookies=cookies or None,
-            headers=headers or None,
-        )
-        cfg = CrawlerRunConfig()
-        async with AsyncWebCrawler(config=bc, verbose=False) as crawler_ctx:
+        if pending:
+            bc = BrowserConfig(
+                use_persistent_context=bool(profile),
+                user_data_dir=profile_dir(profile) if profile else None,
+                cookies=cookies or None,
+                headers=headers or None,
+            )
+            cfg = CrawlerRunConfig()
+            async with AsyncWebCrawler(config=bc, verbose=False) as crawler_ctx:
 
-            async def crawl_one(url):
-                try:
-                    res = await _crawl4ai_once(crawler_ctx, cfg, url, per_url_timeout)
-                    res["markdown"] = res.get("markdown", "")[:max_chars]
-                    return url, await record(url, "crawl4ai", res=res)
-                except TimeoutError:
-                    return url, await record(url, "crawl4ai", exc=TimeoutError("timeout"))
-                except Exception as e:  # noqa: BLE001 - record reason, ladder continues
-                    return url, await record(url, "crawl4ai", exc=e)
+                async def crawl_one(url):
+                    try:
+                        res = await _crawl4ai_once(crawler_ctx, cfg, url, per_url_timeout)
+                        res["markdown"] = res.get("markdown", "")[:max_chars]
+                        return url, await record(url, "crawl4ai", res=res)
+                    except TimeoutError:
+                        return url, await record(url, "crawl4ai", exc=TimeoutError("timeout"))
+                    except Exception as e:  # noqa: BLE001 - record reason, ladder continues
+                        return url, await record(url, "crawl4ai", exc=e)
 
-            for url, out in await asyncio.gather(*(crawl_one(u) for u in pending)):
-                if out:
-                    results[url] = out
-            pending = [u for u in pending if u not in results]
-            if profile:
-                try:
-                    # Persist session so future HTTP-path fetches can reuse it.
-                    # Note: crawl4ai's export_storage_state is broken in 0.9.2
-                    # (accesses self.default_context on the strategy, which
-                    # lives on browser_manager instead) - go direct.
-                    bm = crawler_ctx.crawler_strategy.browser_manager
-                    if bm and bm.default_context is not None:
-                        await bm.default_context.storage_state(path=profile_state_path(profile))
-                    else:
-                        _warn(
-                            f"profile '{profile}' used but no browser context "
-                            "available; session will NOT be persisted"
-                        )
-                except Exception as e:  # noqa: BLE001 - warn, don't crash the batch
-                    _warn(f"failed to persist profile session for '{profile}': {e}")
+                for url, out in await asyncio.gather(*(crawl_one(u) for u in pending)):
+                    if out:
+                        results[url] = out
+                pending = [u for u in pending if u not in results]
+                if profile:
+                    try:
+                        # Persist session so future HTTP-path fetches can reuse it.
+                        # Note: crawl4ai's export_storage_state is broken in 0.9.2
+                        # (accesses self.default_context on the strategy, which
+                        # lives on browser_manager instead) - go direct.
+                        bm = crawler_ctx.crawler_strategy.browser_manager
+                        if bm and bm.default_context is not None:
+                            await bm.default_context.storage_state(path=profile_state_path(profile))
+                        else:
+                            _warn(
+                                f"profile '{profile}' used but no browser context "
+                                "available; session will NOT be persisted"
+                            )
+                    except Exception as e:  # noqa: BLE001 - warn, don't crash the batch
+                        _warn(f"failed to persist profile session for '{profile}': {e}")
 
     # Pass 3: Firecrawl - optional cloud escape hatch.
     if pending and "firecrawl" in steps:

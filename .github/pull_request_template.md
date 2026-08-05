@@ -12,7 +12,7 @@
 ## Checklist
 
 - [ ] `pytest` passes locally
-- [ ] `ruff check webget.py tests` passes
+- [ ] `ruff check webget_cli.py tests` passes
 - [ ] Ran a smoke test (`webget s "test"` or `webget fetch <url> --json`)
 - [ ] No secrets / cookies / tokens added (check the diff!)
 

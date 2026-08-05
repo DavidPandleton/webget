@@ -3208,11 +3208,10 @@ wheels = [
 ]
 
 [[package]]
-name = "webget"
-version = "0.5.0"
-source = { virtual = "." }
+name = "webget-cli"
+version = "0.6.0"
+source = { editable = "." }
 dependencies = [
-    { name = "crawl4ai" },
     { name = "ddgs" },
     { name = "html2text" },
     { name = "httpx" },
@@ -3220,6 +3219,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+browser = [
+    { name = "crawl4ai" },
+]
 dev = [
     { name = "pytest" },
     { name = "ruff" },
@@ -3227,7 +3229,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "crawl4ai", specifier = ">=0.9" },
+    { name = "crawl4ai", marker = "extra == 'browser'", specifier = ">=0.9" },
     { name = "ddgs" },
     { name = "html2text" },
     { name = "httpx" },
@@ -3235,7 +3237,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
     { name = "trafilatura" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["browser", "dev"]
 
 [[package]]
 name = "xxhash"

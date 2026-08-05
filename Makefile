@@ -13,10 +13,10 @@ test:
 	python3 -m pytest
 
 lint:
-	python3 -m ruff check webget.py tests
+	python3 -m ruff check webget_cli.py tests
 
 fmt:
-	python3 -m ruff format webget.py tests
+	python3 -m ruff format webget_cli.py tests
 
 clean:
 	rm -rf __pycache__ .pytest_cache .ruff_cache

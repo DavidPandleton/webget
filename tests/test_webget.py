@@ -4,7 +4,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import webget
+import webget_cli as webget
 
 
 def opts(*args):
