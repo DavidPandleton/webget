@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run python3
-"""webget — local search + scrape, zero API keys, unlimited usage.
+"""webget - local search + scrape, zero API keys, unlimited usage.
 Usage:
   webget s "query" [n]           Search via DuckDuckGo (default 5)
   webget u "https://..."         Scrape URL -> markdown (HTTP fast path, falls back)
@@ -269,7 +269,7 @@ def _auth_state(result, profile):
     status = result.get("status_code")
     text = f"{md} {html}"
 
-    # Challenge markers (Cloudflare, CAPTCHA, etc.) — highest priority.
+    # Challenge markers (Cloudflare, CAPTCHA, etc.) - highest priority.
     challenge_markers = (
         "just a moment", "cf-chl", "challenge-platform", "captcha",
         "hcaptcha", "recaptcha", "verify you are human",
@@ -442,7 +442,7 @@ async def scrape_many(urls, max_chars=6000, per_url_timeout=20, cookies=None,
                 state, authenticated = _auth_state(res, profile)
                 if state == "success":
                     if len((res.get("markdown") or "").strip()) >= 100:
-                        # Valid content — ladder done, no need for next strategy.
+                        # Valid content - ladder done, no need for next strategy.
                         auth = {"profile": profile,
                                 "authenticated": authenticated,
                                 "state": state}
@@ -454,7 +454,7 @@ async def scrape_many(urls, max_chars=6000, per_url_timeout=20, cookies=None,
                         if not no_cache:
                             cache_put(url, cookies, headers, max_chars, out, profile)
                         return url, out
-                    # Thin content: not a terminal state — try next strategy.
+                    # Thin content: not a terminal state - try next strategy.
                     reasons.append((state, method, "content too thin"))
                 else:
                     # Auth failure: record reason, continue ladder.
@@ -481,7 +481,7 @@ async def scrape_many(urls, max_chars=6000, per_url_timeout=20, cookies=None,
                     # Persist session so future HTTP-path fetches can reuse it.
                     # Note: crawl4ai's export_storage_state is broken in 0.9.2
                     # (accesses self.default_context on the strategy, which
-                    # lives on browser_manager instead) — go direct.
+                    # lives on browser_manager instead) - go direct.
                     bm = crawler_ctx.crawler_strategy.browser_manager
                     if bm and bm.default_context is not None:
                         await bm.default_context.storage_state(
@@ -528,7 +528,7 @@ def search(query, n=5):
 
 def main():
     args = sys.argv[1:]
-    if not args:
+    if not args or args[0] in ("-h", "--help"):
         print(__doc__)
         return
 

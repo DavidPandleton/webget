@@ -1,0 +1,64 @@
+# Changelog
+
+All notable changes to webget are documented here. Format follows
+[Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
+
+## [Unreleased]
+
+## [0.4.0] - 2026-08-05
+
+### Fixed
+- **Auth ladder correctness** (audit fixes):
+  - HTTP path now reads session cookies from a profile's exported
+    `storage_state.json`, so `--profile` works on the fast path too.
+  - Ladder no longer stops at the first auth failure. HTTP `401`/`403`/login
+    page records the reason and falls through to Crawl4AI, then Firecrawl.
+  - `403` is only classified as `login_required` when login/session markers
+    are present; generic `403` is `blocked`.
+  - `authenticated` is `null` for public pages, `true` only when a profile
+    session was actually used.
+- Profile name validation: rejects path traversal (`../`, `/`, `\`, `~`).
+- URL host parsing via `urllib.parse.urlparse` instead of string splitting.
+- Crawl4AI retry policy: retries timeouts/transients, skips blind retries on
+  `401`/`403`/challenge.
+
+### Added
+- `--no-cache` flag: fetch without reading or writing the disk cache
+  (private/authenticated fetches).
+- Export of persistent profile session state to
+  `profiles/<name>/storage_state.json` after a Crawl4AI run.
+
+## [0.3.0] - 2026-08-05
+
+### Added
+- Authenticated session layer:
+  - `--profile NAME` persistent browser profiles (Playwright persistent
+    context) in `~/.local/share/webget/profiles/`.
+  - Auth-state classifier: `success | login_required | challenge | blocked |
+    error`, surfaced in JSON as `auth` metadata.
+  - `--cookies` long alias for `-c`.
+- Cache isolation per profile (public vs `campus` vs `work` never collide).
+
+## [0.2.0] - 2026-08-05
+
+### Added
+- HTTP fast path: `httpx` + `trafilatura`/`html2text`, no browser needed for
+  static pages.
+- Fetch router with strategy ladder: `auto` = HTTP → Crawl4AI → Firecrawl
+  (Firecrawl only when `WEBGET_FIRECRAWL_KEY` is set).
+- Result metadata: `status`, `method`, `cached`, `attempts`.
+- `--strategy` flag; `--limit` replaces the dual meaning of `-n`.
+- Command aliases: `search`, `fetch`, `search-fetch`.
+- Disk cache with TTL + eviction (500 files).
+
+### Fixed
+- Failures are never cached (previously a failed crawl could be cached as an
+  empty success).
+- Crawl4AI `CrawlResult.success` is checked before trusting content.
+
+## [0.1.0] - 2026-08-05
+
+### Added
+- Initial release: DuckDuckGo search (`s`), Crawl4AI scrape (`u`), search +
+  scrape (`su`), batch stdin, `-c`/`-H`/`-n`/`-t` options, JSON output.
+- Zero API keys, unlimited usage.

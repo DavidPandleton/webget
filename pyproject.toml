@@ -1,0 +1,35 @@
+[project]
+name = "webget"
+version = "0.4.0"
+description = "Local search + scrape CLI with an HTTP fast path, Crawl4AI fallback, and authenticated session profiles. Zero API keys."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "David Tarigan", email = "tarigansdavid@gmail.com" }]
+keywords = ["scraping", "crawling", "cli", "search", "crawl4ai", "duckduckgo", "playwright"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP",
+]
+
+[project.scripts]
+webget = "webget:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.setuptools]
+py-modules = ["webget"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
