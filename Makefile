@@ -3,8 +3,8 @@
 .PHONY: install dev test lint fmt clean
 
 install:
-	uv pip install --python $$(which python3) crawl4ai ddgs httpx trafilatura html2text
-	@echo "done. run: cp webget.py ~/.local/bin/webget && chmod +x ~/.local/bin/webget"
+	uv pip install --python $$(which python3) .
+	@echo "done. binary available via entry point 'webget'"
 
 dev:
 	uv pip install --python $$(which python3) -e ".[dev]"

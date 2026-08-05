@@ -253,6 +253,11 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
         }
 
 
+def _warn(msg):
+    """Print a warning to stderr so stdout (JSON) stays clean."""
+    print(f"webget: warning: {msg}", file=sys.stderr)
+
+
 def firecrawl_key():
     return os.environ.get("WEBGET_FIRECRAWL_KEY", "").strip()
 
@@ -455,9 +460,63 @@ async def scrape_many(
     if not missing:
         return results
 
-    crawler_ctx = None
-    cfg = None
-    if "crawl4ai" in steps:
+    attempts = {u: 0 for u in missing}
+    reasons = {u: [] for u in missing}
+    pending = list(missing)
+
+    async def record(url, method, res=None, exc=None):
+        """Classify one strategy result; return success dict or None (keep climbing)."""
+        attempts[url] += 1
+        if exc is not None or res is None:
+            reasons[url].append(("error", method, str(exc or "no result")))
+            return None
+        state, authenticated = _auth_state(res, profile)
+        if state == "success" and len((res.get("markdown") or "").strip()) >= 100:
+            auth = {"profile": profile, "authenticated": authenticated, "state": state}
+            out = {
+                "title": res.get("title", ""),
+                "markdown": res.get("markdown", ""),
+                "status": "success",
+                "method": method,
+                "cached": False,
+                "attempts": attempts[url],
+                "error": None,
+                "auth": auth,
+            }
+            if not no_cache:
+                cache_put(url, cookies, headers, max_chars, out, profile)
+            return out
+        if state == "success":
+            reasons[url].append((state, method, "content too thin"))
+        else:
+            reasons[url].append((state, method, _auth_message(state, profile)))
+        return None
+
+    # Pass 1: HTTP fast path - no browser involved.
+    if "http" in steps:
+
+        async def http_one(url):
+            try:
+                res = await fetch_http(
+                    url,
+                    max_chars,
+                    _effective_cookies(cookies, profile),
+                    headers,
+                    timeout=per_url_timeout,
+                )
+                return url, await record(url, "http", res=res)
+            except TimeoutError:
+                return url, await record(url, "http", exc=TimeoutError("timeout"))
+            except Exception as e:  # noqa: BLE001 - record reason, ladder continues
+                return url, await record(url, "http", exc=e)
+
+        for url, out in await asyncio.gather(*(http_one(u) for u in pending)):
+            if out:
+                results[url] = out
+        pending = [u for u in pending if u not in results]
+
+    # Pass 2: Crawl4AI browser - only launched if something still needs it.
+    if pending and "crawl4ai" in steps:
         from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
 
         bc = BrowserConfig(
@@ -467,74 +526,22 @@ async def scrape_many(
             headers=headers or None,
         )
         cfg = CrawlerRunConfig()
-        crawler_ctx = AsyncWebCrawler(config=bc, verbose=False)
+        async with AsyncWebCrawler(config=bc, verbose=False) as crawler_ctx:
 
-    async def fetch_one(url):
-        attempts = 0
-        reasons = []  # (state, method, detail)
-        for method in steps:
-            attempts += 1
-            try:
-                if method == "http":
-                    res = await fetch_http(
-                        url,
-                        max_chars,
-                        _effective_cookies(cookies, profile),
-                        headers,
-                        timeout=per_url_timeout,
-                    )
-                elif method == "crawl4ai":
+            async def crawl_one(url):
+                try:
                     res = await _crawl4ai_once(crawler_ctx, cfg, url, per_url_timeout)
                     res["markdown"] = res.get("markdown", "")[:max_chars]
-                elif method == "firecrawl":
-                    res = await fetch_firecrawl(
-                        url, max_chars, firecrawl_key(), timeout=per_url_timeout
-                    )
-                state, authenticated = _auth_state(res, profile)
-                if state == "success":
-                    if len((res.get("markdown") or "").strip()) >= 100:
-                        # Valid content - ladder done, no need for next strategy.
-                        auth = {"profile": profile, "authenticated": authenticated, "state": state}
-                        out = {
-                            "title": res.get("title", ""),
-                            "markdown": res.get("markdown", ""),
-                            "status": "success",
-                            "method": method,
-                            "cached": False,
-                            "attempts": attempts,
-                            "error": None,
-                            "auth": auth,
-                        }
-                        if not no_cache:
-                            cache_put(url, cookies, headers, max_chars, out, profile)
-                        return url, out
-                    # Thin content: not a terminal state - try next strategy.
-                    reasons.append((state, method, "content too thin"))
-                else:
-                    # Auth failure: record reason, continue ladder.
-                    reasons.append((state, method, _auth_message(state, profile)))
-            except TimeoutError:
-                reasons.append(("error", method, "timeout"))
-            except Exception as e:  # noqa: BLE001 - record reason, ladder continues
-                reasons.append(("error", method, str(e)))
-        # Ladder exhausted: pick best terminal state from all reasons.
-        state, authenticated, detail = _terminal_state(reasons, profile)
-        auth = {"profile": profile, "authenticated": authenticated, "state": state}
-        return url, {
-            "title": "",
-            "markdown": "",
-            "status": state,
-            "method": steps[-1],
-            "cached": False,
-            "attempts": attempts,
-            "error": detail,
-            "auth": auth,
-        }
+                    return url, await record(url, "crawl4ai", res=res)
+                except TimeoutError:
+                    return url, await record(url, "crawl4ai", exc=TimeoutError("timeout"))
+                except Exception as e:  # noqa: BLE001 - record reason, ladder continues
+                    return url, await record(url, "crawl4ai", exc=e)
 
-    if crawler_ctx is not None:
-        async with crawler_ctx:
-            for url, res in await asyncio.gather(*(fetch_one(u) for u in missing)):
-                results[url] = res
+            for url, out in await asyncio.gather(*(crawl_one(u) for u in pending)):
+                if out:
+                    results[url] = out
+            pending = [u for u in pending if u not in results]
             if profile:
                 try:
                     # Persist session so future HTTP-path fetches can reuse it.
@@ -544,11 +551,45 @@ async def scrape_many(
                     bm = crawler_ctx.crawler_strategy.browser_manager
                     if bm and bm.default_context is not None:
                         await bm.default_context.storage_state(path=profile_state_path(profile))
-                except Exception:  # noqa: BLE001, S110 - state export is best-effort
-                    pass
-    else:
-        for url, res in await asyncio.gather(*(fetch_one(u) for u in missing)):
-            results[url] = res
+                    else:
+                        _warn(
+                            f"profile '{profile}' used but no browser context "
+                            "available; session will NOT be persisted"
+                        )
+                except Exception as e:  # noqa: BLE001 - warn, don't crash the batch
+                    _warn(f"failed to persist profile session for '{profile}': {e}")
+
+    # Pass 3: Firecrawl - optional cloud escape hatch.
+    if pending and "firecrawl" in steps:
+
+        async def fc_one(url):
+            try:
+                res = await fetch_firecrawl(
+                    url, max_chars, firecrawl_key(), timeout=per_url_timeout
+                )
+                return url, await record(url, "firecrawl", res=res)
+            except Exception as e:  # noqa: BLE001 - record reason, ladder continues
+                return url, await record(url, "firecrawl", exc=e)
+
+        for url, out in await asyncio.gather(*(fc_one(u) for u in pending)):
+            if out:
+                results[url] = out
+        pending = [u for u in pending if u not in results]
+
+    # Ladder exhausted for the rest: terminal state from all recorded reasons.
+    for url in pending:
+        state, authenticated, detail = _terminal_state(reasons[url], profile)
+        auth = {"profile": profile, "authenticated": authenticated, "state": state}
+        results[url] = {
+            "title": "",
+            "markdown": "",
+            "status": state,
+            "method": steps[-1],
+            "cached": False,
+            "attempts": attempts[url],
+            "error": detail,
+            "auth": auth,
+        }
     return results
 
 
@@ -612,8 +653,8 @@ def main():
     if profile:
         try:
             os.makedirs(profile_dir(profile), exist_ok=True)
-        except OSError:
-            pass
+        except OSError as e:
+            _warn(f"cannot create profile dir for '{profile}': {e}")
 
     cmd = args[0]
     if cmd == "search":

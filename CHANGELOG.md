@@ -7,6 +7,19 @@ All notable changes to webget are documented here. Format follows
 
 ## [0.4.0] - 2026-08-05
 
+### Changed (pre-release audit)
+- Browser is now launched lazily: `auto` strategy tries HTTP first and only
+  starts Crawl4AI/Playwright if a URL still needs it. Previously the browser
+  launched preemptively even for static pages.
+- Profile persistence failures no longer vanish silently: `webget` warns on
+  stderr when a session cannot be exported or the profile dir cannot be
+  created.
+- Packaging: runtime deps (`crawl4ai`, `ddgs`, `httpx`, `trafilatura`,
+  `html2text`) declared in `pyproject.toml`; `pip install .` now works.
+- CI splits unit tests (pure logic, no runtime deps) from a package smoke
+  test that installs from `pyproject.toml`.
+- README JSON example corrected to the real shape (dict keyed by URL).
+
 ### Fixed
 - **Auth ladder correctness** (audit fixes):
   - HTTP path now reads session cookies from a profile's exported

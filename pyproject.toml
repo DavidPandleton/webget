@@ -16,6 +16,13 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Internet :: WWW/HTTP",
 ]
+dependencies = [
+    "crawl4ai>=0.9",
+    "ddgs",
+    "httpx",
+    "trafilatura",
+    "html2text",
+]
 
 [project.scripts]
 webget = "webget:main"

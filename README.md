@@ -94,19 +94,22 @@ each browser run, so the fast path can reuse them. Secrets are never printed.
 
 ## JSON output
 
+`--json` returns a dict keyed by URL, so batch results are easy to inspect:
+
 ```json
 {
-  "url": "https://campus.example/dashboard",
-  "status": "success",
-  "method": "crawl4ai",
-  "cached": false,
-  "attempts": 1,
-  "auth": {
-    "profile": "campus",
-    "authenticated": true,
-    "state": "success"
-  },
-  "error": null
+  "https://campus.example/dashboard": {
+    "status": "success",
+    "method": "crawl4ai",
+    "cached": false,
+    "attempts": 1,
+    "auth": {
+      "profile": "campus",
+      "authenticated": true,
+      "state": "success"
+    },
+    "error": null
+  }
 }
 ```
 
