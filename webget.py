@@ -6,6 +6,9 @@ Usage:
   webget su "query" [n]          Search + scrape top n results (default 3, parallel)
   webget s "q" | webget u -      Pipe: pass URL from search via stdin
                                  (multi-line stdin = batch scrape)
+  webget login URL --profile X   Open browser, log in manually, persist session
+  webget profiles [--json]       List profiles and session status
+  webget logout URL --profile X  Clear auth for one domain, keep the rest
 Aliases: search = s, fetch = u, search-fetch = su
 
 Options:
@@ -20,10 +23,15 @@ Options:
   --ttl N             Cache TTL in seconds (default: 3600)
   --strategy S        Fetch strategy: auto|http|crawl4ai|firecrawl (default auto)
   --no-cache          Don't read or write the disk cache (private fetch)
+  --headless          Run login browser without a window (tests/automation)
   --json              Output results as JSON with metadata
                       (status/method/cached/auth)
 
 Status values: success | login_required | challenge | blocked | error
+
+Session management:
+  webget login never stores passwords and never fills forms. You log in
+  yourself in the opened browser window; webget just persists the session.
 """
 
 import asyncio
@@ -135,6 +143,7 @@ def parse_opts(args):
     strategy = "auto"
     profile = None
     no_cache = False
+    headless = False
     remaining = []
     i = 0
     while i < len(args):
@@ -146,6 +155,9 @@ def parse_opts(args):
             i += 2
         elif args[i] == "--no-cache":
             no_cache = True
+            i += 1
+        elif args[i] == "--headless":
+            headless = True
             i += 1
         elif args[i] in ("-H", "--header") and i + 1 < len(args):
             headers_list.append(args[i + 1])
@@ -187,6 +199,7 @@ def parse_opts(args):
         strategy,
         profile,
         no_cache,
+        headless,
     )
 
 
@@ -625,6 +638,236 @@ def search(query, n=5):
     ]
 
 
+def _read_json(path):
+    """Sync helper for to_thread: read + parse JSON, raises on bad data."""
+    with open(path) as f:
+        return json.load(f)
+
+
+def _write_json(path, data):
+    """Sync helper for to_thread: write JSON."""
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+
+# ---------- Phase 4: session management UX ----------
+
+
+def _valid_site_url(raw):
+    """Validate a user-supplied site URL. Returns (ok, hostname_or_error)."""
+    from urllib.parse import urlparse
+
+    if not raw or raw.isspace():
+        return False, "no site URL given"
+    if "://" not in raw:
+        raw = "https://" + raw
+    u = urlparse(raw)
+    if u.scheme not in ("http", "https"):
+        return False, f"unsupported scheme: {u.scheme or 'none'}"
+    if not u.hostname:
+        return False, f"could not parse hostname from {raw!r}"
+    host = u.hostname.lower()
+    # Reject spaces / anything that is not a plausible hostname or IP.
+    if any(ch.isspace() for ch in host):
+        return False, f"invalid hostname: {host!r}"
+    if not all(ch.isalnum() or ch in ".-_" for ch in host):
+        return False, f"invalid hostname: {host!r}"
+    return True, host
+
+
+def _profile_meta(profile):
+    """Non-sensitive metadata about one profile. Never returns cookie values."""
+    d = profile_dir(profile)
+    state_p = profile_state_path(profile)
+    last_used = None
+    status = "unknown"
+    size = 0
+    for dirpath, _dirnames, filenames in os.walk(d):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            try:
+                size += os.path.getsize(fp)
+            except OSError:
+                pass
+            mtime = os.path.getmtime(fp)
+            if last_used is None or mtime > last_used:
+                last_used = mtime
+    if os.path.exists(state_p):
+        try:
+            with open(state_p) as f:
+                state = json.load(f)
+            cookies = state.get("cookies") or []
+            if cookies:
+                now = time.time()
+                # Treat cookie as live if it has no expiry or expires in the future.
+                live = [
+                    c
+                    for c in cookies
+                    if (c.get("expires") or -1) < 0 or (c.get("expires") or 0) > now
+                ]
+                status = "authenticated" if live else "expired"
+        except (json.JSONDecodeError, OSError):
+            status = "corrupt"
+    return {"profile": profile, "last_used": last_used, "size": size, "status": status}
+
+
+def _fmt_age(ts):
+    if ts is None:
+        return "-"
+    diff = time.time() - ts
+    if diff < 60:
+        return f"{int(diff)}s ago"
+    if diff < 3600:
+        return f"{int(diff // 60)}m ago"
+    if diff < 86400:
+        return f"{int(diff // 3600)}h ago"
+    return f"{int(diff // 86400)}d ago"
+
+
+def cmd_profiles(json_out):
+    if not os.path.isdir(PROFILE_DIR):
+        if json_out:
+            print("{}")
+        else:
+            print("PROFILE     LAST USED     SIZE       STATUS\n(no profiles yet)")
+        return
+    profiles = []
+    for name in sorted(os.listdir(PROFILE_DIR)):
+        if not os.path.isdir(profile_dir(name)):
+            continue
+        try:
+            profile_dir(name)  # validates name; raises SystemExit on bad names
+            meta = _profile_meta(name)
+            if meta["size"] > 0 or meta["status"] != "unknown":
+                profiles.append(meta)
+        except SystemExit:
+            # Skip malformed dir names that fail validation (e.g. "..").
+            continue
+    if json_out:
+        print(json.dumps({p["profile"]: p for p in profiles}, indent=2))
+        return
+    print(f"{'PROFILE':<12} {'LAST USED':<12} {'SIZE':>10}  STATUS")
+    for p in profiles:
+        print(
+            f"{p['profile']:<12} {_fmt_age(p['last_used']):<12} "
+            f"{p['size'] / 1024 / 1024:>8.1f} MB  {p['status']}"
+        )
+
+
+async def _login_flow(site, profile, headless):
+    from playwright.async_api import async_playwright
+
+    state_p = profile_state_path(profile)
+    os.makedirs(profile_dir(profile), exist_ok=True)
+
+    async with async_playwright() as p:
+        context = await p.chromium.launch_persistent_context(
+            user_data_dir=profile_dir(profile),
+            headless=headless,
+        )
+        page = context.pages[0] if context.pages else await context.new_page()
+        print(f"Opening {site} in a browser with profile '{profile}'...")
+        print("Log in manually in the browser window.")
+        print("When you are done, come back here and press Enter.")
+        try:
+            await page.goto(site, wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:  # noqa: BLE001 - navigation issues shouldn't kill login
+            _warn(f"could not navigate to {site}: {e}")
+        try:
+            await asyncio.to_thread(input, "Press Enter when done: ")
+        except EOFError:
+            pass  # non-interactive stdin (tests) - proceed immediately
+        try:
+            await context.storage_state(path=state_p)
+            print(f"Session persisted for profile '{profile}'.")
+        except Exception as e:  # noqa: BLE001 - persistence must surface
+            _warn(f"failed to persist profile session for '{profile}': {e}")
+        await context.close()
+
+
+def cmd_login(site, profile, headless):
+    ok, host = _valid_site_url(site)
+    if not ok:
+        print(f"error: invalid site URL: {host}")
+        return 2
+    if not profile:
+        print("error: --profile NAME is required for login")
+        return 2
+    try:
+        profile_dir(profile)
+    except SystemExit as e:
+        print(f"error: {e}")
+        return 2
+    print(f"webget login: profile '{profile}' for {host}")
+    asyncio.run(_login_flow(site, profile, headless))
+    return 0
+
+
+def _domain_match(cookie_domain, host):
+    """True if cookie_domain (e.g. '.example.com') covers host."""
+    d = (cookie_domain or "").lstrip(".").lower()
+    h = host.lower()
+    return d == h or h.endswith("." + d)
+
+
+async def _logout_flow(site, profile):
+    from playwright.async_api import async_playwright
+
+    ok, host = _valid_site_url(site)
+    if not ok:
+        return False, host
+    state_p = profile_state_path(profile)
+    removed = 0
+    # 1. Prune the exported storage state (used by the HTTP fast path).
+    if os.path.exists(state_p):
+        try:
+            state = await asyncio.to_thread(_read_json, state_p)
+            cookies = state.get("cookies") or []
+            kept = [c for c in cookies if not _domain_match(c.get("domain", ""), host)]
+            removed = len(cookies) - len(kept)
+            state["cookies"] = kept
+            await asyncio.to_thread(_write_json, state_p, state)
+        except (json.JSONDecodeError, OSError) as e:
+            return False, f"could not read profile storage state: {e}"
+    # 2. Clear the live browser context for that domain (persistent profile).
+    async with async_playwright() as p:
+        context = await p.chromium.launch_persistent_context(
+            user_data_dir=profile_dir(profile), headless=True
+        )
+        try:
+            await context.clear_cookies()
+            all_cookies = await context.cookies()
+            keep = [c for c in all_cookies if not _domain_match(c.get("domain", ""), host)]
+            removed += len(all_cookies) - len(keep)
+            await context.add_cookies(keep)
+        except Exception as e:  # noqa: BLE001 - warn, still done
+            _warn(f"could not clear browser cookies for {host}: {e}")
+        await context.close()
+    return True, removed
+
+
+def cmd_logout(site, profile):
+    if not profile:
+        print("error: --profile NAME is required for logout")
+        return 2
+    try:
+        profile_dir(profile)
+    except SystemExit as e:
+        print(f"error: {e}")
+        return 2
+    ok, host_or_err = _valid_site_url(site)
+    if not ok:
+        print(f"error: invalid site URL: {host_or_err}")
+        return 2
+    ok, removed = asyncio.run(_logout_flow(site, profile))
+    if not ok:
+        print(f"error: {removed}")
+        return 1
+    print(f"Logged out {host_or_err} from profile '{profile}' ({removed} cookies cleared).")
+    print("Other domains in this profile were left untouched.")
+    return 0
+
+
 def main():
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
@@ -644,6 +887,7 @@ def main():
         strategy,
         profile,
         no_cache,
+        headless,
     ) = parse_opts(args)
 
     if not args:
@@ -664,6 +908,14 @@ def main():
     elif cmd == "search-fetch":
         cmd = "su"
     q = args[1] if len(args) > 1 else ""
+
+    if cmd == "login":
+        sys.exit(cmd_login(q, profile, headless))
+    elif cmd == "profiles":
+        cmd_profiles(json_out)
+        return
+    elif cmd == "logout":
+        sys.exit(cmd_logout(q, profile))
 
     if cmd == "s":
         n = limit or (int(args[2]) if len(args) > 2 else 5)

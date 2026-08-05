@@ -79,18 +79,26 @@ Long aliases: `search` = `s`, `fetch` = `u`, `search-fetch` = `su`.
 ## Authenticated sessions (profiles)
 
 ```bash
-# seed a profile once with exported cookies
-webget fetch https://campus.example/dashboard \
-  --cookies ~/cookies.txt \
-  --profile campus
+# interactive login: browser opens, YOU log in manually, session persists
+webget login https://campus.example --profile campus
+
+# list profiles and their session status
+webget profiles
+webget profiles --json
 
 # later fetches reuse the session - even on the HTTP fast path
 webget fetch https://campus.example/dashboard --profile campus --json
+
+# log out ONE domain, keep the rest of the profile
+webget logout https://campus.example --profile campus
 ```
 
-Persistent profiles live in `~/.local/share/webget/profiles/<name>`.
-Session cookies are exported to `storage_state.json` inside the profile after
-each browser run, so the fast path can reuse them. Secrets are never printed.
+`webget login` never stores passwords and never fills forms. A visible
+browser opens, you authenticate yourself, then press Enter in the terminal and
+webget persists the session. Persistent profiles live in
+`~/.local/share/webget/profiles/<name>`; session cookies are exported to
+`storage_state.json` inside the profile after each browser run, so the fast
+path can reuse them. Secrets are never printed.
 
 ## JSON output
 

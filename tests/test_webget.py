@@ -21,10 +21,10 @@ def auth_state(md="", html="", status=None, profile=None):
 
 class TestParseOpts:
     def test_positional(self):
-        remaining, *_, limit, strategy, profile, no_cache = opts("u", "https://x.com")
+        remaining, *_, limit, strategy, profile, no_cache, headless = opts("u", "https://x.com")
         assert remaining == ["u", "https://x.com"]
         assert limit is None and strategy == "auto" and profile is None
-        assert no_cache is False
+        assert no_cache is False and headless is False
 
     def test_cookies_short_and_long(self, tmp_path):
         ck = tmp_path / "ck.txt"
@@ -42,18 +42,22 @@ class TestParseOpts:
         assert mc1 == 500 and mc2 == 500
 
     def test_limit(self):
-        *_, limit, _, _, _ = opts("s", "q", "--limit", "7")
+        *_, limit, _, _, _, _ = opts("s", "q", "--limit", "7")
         assert limit == 7
 
     def test_profile_and_no_cache(self):
-        *_, profile, no_cache = opts("u", "https://x.com", "--profile", "campus")
+        *_, profile, no_cache, _ = opts("u", "https://x.com", "--profile", "campus")
         assert profile == "campus" and no_cache is False
-        *_, profile, no_cache = opts("u", "https://x.com", "--no-cache")
+        *_, profile, no_cache, _ = opts("u", "https://x.com", "--no-cache")
         assert profile is None and no_cache is True
 
     def test_strategy(self):
-        *_, strategy, _, _ = opts("u", "https://x.com", "--strategy", "crawl4ai")
+        *_, strategy, _, _, _ = opts("u", "https://x.com", "--strategy", "crawl4ai")
         assert strategy == "crawl4ai"
+
+    def test_headless(self):
+        *_, headless = opts("login", "https://x.com", "--headless")
+        assert headless is True
 
     def test_unknown_flag_passthrough(self):
         remaining, *_ = opts("u", "https://x.com", "--weird")
@@ -216,3 +220,143 @@ class TestCacheIsolation:
         a = webget._cache_path("https://x.com", None, None, 500, None)
         b = webget._cache_path("https://x.com", ck, None, 500, None)
         assert a != b
+
+
+# ---------- Phase 4: session management ----------
+
+
+class TestValidSiteURL:
+    def test_plain_domain(self):
+        ok, host = webget._valid_site_url("example.com")
+        assert ok and host == "example.com"
+
+    def test_full_url(self):
+        ok, host = webget._valid_site_url("https://campus.example/dashboard")
+        assert ok and host == "campus.example"
+
+    def test_no_scheme_added(self):
+        ok, host = webget._valid_site_url("campus.example")
+        assert ok and host == "campus.example"
+
+    def test_bad_scheme(self):
+        ok, _err = webget._valid_site_url("ftp://x.com")
+        assert not ok and "scheme" in _err
+
+    def test_empty(self):
+        ok, _err = webget._valid_site_url("")
+        assert not ok
+
+    def test_garbage(self):
+        ok, _err = webget._valid_site_url("://:")
+        assert not ok
+
+    def test_spaces_rejected(self):
+        ok, _err = webget._valid_site_url("not a url")
+        assert not ok
+
+
+class TestDomainMatch:
+    def test_exact(self):
+        assert webget._domain_match("example.com", "example.com")
+
+    def test_leading_dot(self):
+        assert webget._domain_match(".example.com", "example.com")
+
+    def test_subdomain(self):
+        assert webget._domain_match(".example.com", "api.example.com")
+
+    def test_unrelated(self):
+        assert not webget._domain_match("other.com", "example.com")
+
+    def test_suffix_trap(self):
+        # evil.com must not match notevil.com
+        assert not webget._domain_match("evil.com", "notevil.com")
+
+
+class TestProfileMeta:
+    def test_unknown_without_state(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(webget, "PROFILE_DIR", str(tmp_path))
+        d = tmp_path / "campus"
+        d.mkdir()
+        meta = webget._profile_meta("campus")
+        assert meta["status"] == "unknown"
+
+    def test_authenticated_with_live_cookie(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(webget, "PROFILE_DIR", str(tmp_path))
+        d = tmp_path / "campus"
+        (d / "Default").mkdir(parents=True)
+        state = {
+            "cookies": [{"name": "s", "value": "secret", "domain": ".example.com", "expires": -1}]
+        }
+        import json
+
+        (d / "storage_state.json").write_text(json.dumps(state))
+        meta = webget._profile_meta("campus")
+        assert meta["status"] == "authenticated"
+
+    def test_expired_cookie(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(webget, "PROFILE_DIR", str(tmp_path))
+        d = tmp_path / "campus"
+        d.mkdir()
+        state = {"cookies": [{"name": "s", "value": "x", "domain": ".e.com", "expires": 1}]}
+        import json
+
+        (d / "storage_state.json").write_text(json.dumps(state))
+        meta = webget._profile_meta("campus")
+        assert meta["status"] == "expired"
+
+    def test_corrupt_state(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(webget, "PROFILE_DIR", str(tmp_path))
+        d = tmp_path / "campus"
+        d.mkdir()
+        (d / "storage_state.json").write_text("{not json")
+        meta = webget._profile_meta("campus")
+        assert meta["status"] == "corrupt"
+
+    def test_meta_never_contains_cookie_values(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(webget, "PROFILE_DIR", str(tmp_path))
+        d = tmp_path / "campus"
+        (d / "Default").mkdir(parents=True)
+        state = {"cookies": [{"name": "session", "value": "SUPERSECRET", "domain": ".e.com"}]}
+        import json
+
+        (d / "storage_state.json").write_text(json.dumps(state))
+        blob = json.dumps(webget._profile_meta("campus"))
+        assert "SUPERSECRET" not in blob
+        assert "session" not in blob
+
+
+class TestLogoutPrune:
+    def _state(self):
+        return {
+            "cookies": [
+                {"name": "a", "value": "1", "domain": ".campus.example"},
+                {"name": "b", "value": "2", "domain": "github.com"},
+                {"name": "c", "value": "3", "domain": ".other.example"},
+            ]
+        }
+
+    def test_prune_one_domain(self):
+        state = self._state()
+        cookies = state["cookies"]
+        kept = [
+            c for c in cookies if not webget._domain_match(c.get("domain", ""), "campus.example")
+        ]
+        assert len(kept) == 2
+        assert all(c["domain"] != ".campus.example" for c in kept)
+
+    def test_preserve_other_domains(self):
+        state = self._state()
+        kept = [
+            c
+            for c in state["cookies"]
+            if not webget._domain_match(c.get("domain", ""), "campus.example")
+        ]
+        assert {c["domain"] for c in kept} == {"github.com", ".other.example"}
+
+    def test_all_domains_kept_when_no_match(self):
+        state = self._state()
+        kept = [
+            c for c in state["cookies"] if not webget._domain_match(c.get("domain", ""), "nope.com")
+        ]
+        assert len(kept) == 3

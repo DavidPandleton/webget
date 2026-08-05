@@ -5,6 +5,22 @@ All notable changes to webget are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-05
+
+### Added
+- Session management UX (Phase 4):
+  - `webget login <site> --profile NAME` - interactive login: opens a
+    visible browser, user authenticates manually, session is persisted on
+    Enter. Never stores passwords or fills forms. `--headless` for
+    tests/automation.
+  - `webget profiles [--json]` - lists profiles with last-used, size, and
+    session status (`authenticated` / `expired` / `unknown` / `corrupt`).
+    Never exposes cookie values.
+  - `webget logout <site> --profile NAME` - clears authentication for one
+    domain only, preserving unrelated domains in the same profile. Does not
+    delete the profile.
+- Hostname validation for `login`/`logout` site URLs.
+
 ## [0.4.0] - 2026-08-05
 
 ### Changed (pre-release audit)
