@@ -1,0 +1,23 @@
+# Secrets & credentials - never commit these
+*.pem
+*.key
+*.crt
+.env
+.env.*
+cookies*.txt
+*_cookies.txt
+*.cookies
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Runtime state (never in repo)
+.cache/
+profiles/
+storage_state*.json
+
+# Editor / OS
+.DS_Store
+*.swp
