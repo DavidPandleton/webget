@@ -25,13 +25,14 @@ Options:
 
 Status values: success | login_required | challenge | blocked | error
 """
-import sys
+
 import asyncio
-import os
 import hashlib
 import json
-import time
+import os
 import re
+import sys
+import time
 
 
 def parse_cookie_file(path):
@@ -45,7 +46,7 @@ def parse_cookie_file(path):
             parts = line.split("\t")
             if len(parts) < 7:
                 continue
-            domain, domain_flag, path_, secure, expires, name, value = parts[:7]
+            domain, _domain_flag, path_, secure, expires, name, value = parts[:7]
             cookie = {
                 "name": name,
                 "value": value,
@@ -108,8 +109,9 @@ def cache_put(url, cookies, headers, max_chars, data, profile=None):
             json.dump({**data, "fetched_at": time.time()}, f)
         # simple eviction: keep newest 400 of 500
         try:
-            files = [os.path.join(CACHE_DIR, f) for f in os.listdir(CACHE_DIR)
-                     if f.endswith(".json")]
+            files = [
+                os.path.join(CACHE_DIR, f) for f in os.listdir(CACHE_DIR) if f.endswith(".json")
+            ]
             if len(files) > 500:
                 files.sort(key=os.path.getmtime)
                 for f in files[:-400]:
@@ -172,62 +174,83 @@ def parse_opts(args):
         else:
             remaining.append(args[i])
             i += 1
-    return (remaining, cookies, parse_headers(headers_list), max_chars,
-            timeout, fresh, ttl, json_out, limit, strategy, profile, no_cache)
+    return (
+        remaining,
+        cookies,
+        parse_headers(headers_list),
+        max_chars,
+        timeout,
+        fresh,
+        ttl,
+        json_out,
+        limit,
+        strategy,
+        profile,
+        no_cache,
+    )
 
 
 def _extract_markdown(html):
     """Try trafilatura (clean article text) then html2text (full markdown)."""
     try:
         import trafilatura
+
         text = trafilatura.extract(html, include_comments=False, include_tables=True)
         if text and len(text.strip()) > 100:
             return text.strip()
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 - extraction libs vary; fall through
         pass
     try:
         import html2text
+
         h = html2text.HTML2Text()
         h.ignore_links = False
         h.body_width = 0
         md = h.handle(html).strip()
         return md if len(md) > 50 else ""
-    except Exception:
+    except Exception:  # noqa: BLE001 - best-effort extraction, empty is fine
         return ""
 
 
 async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
     """Fast path: plain HTTP GET + local markdown extraction."""
     import httpx
+
     hdrs = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+        "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
     }
     if headers:
         hdrs.update(headers)
     cj = {}
     if cookies:
         from urllib.parse import urlparse
+
         host = (urlparse(url).hostname or "").lower()
         if host:
             for c in cookies:
                 d = (c.get("domain") or "").lstrip(".").lower()
                 if d and (host == d or host.endswith("." + d)):
                     cj[c["name"]] = c["value"]
-    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout,
-                                 headers=hdrs, cookies=cj) as client:
+    async with httpx.AsyncClient(
+        follow_redirects=True, timeout=timeout, headers=hdrs, cookies=cj
+    ) as client:
         r = await client.get(url)
         ctype = r.headers.get("content-type", "")
         if "html" not in ctype and "text" not in ctype:
             raise RuntimeError(f"not HTML ({ctype or 'unknown'})")
         html = r.text
         title = ""
-        m = re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I)
+        m = re.search(r"<title[^>]*>(.*?)</title>", html, re.DOTALL | re.IGNORECASE)
         if m:
             title = re.sub(r"\s+", " ", m.group(1)).strip()
         md = await asyncio.to_thread(_extract_markdown, html)
-        return {"title": title, "markdown": md[:max_chars],
-                "status_code": r.status_code, "html": html[:8000]}
+        return {
+            "title": title,
+            "markdown": md[:max_chars],
+            "status_code": r.status_code,
+            "html": html[:8000],
+        }
 
 
 def firecrawl_key():
@@ -271,9 +294,16 @@ def _auth_state(result, profile):
 
     # Challenge markers (Cloudflare, CAPTCHA, etc.) - highest priority.
     challenge_markers = (
-        "just a moment", "cf-chl", "challenge-platform", "captcha",
-        "hcaptcha", "recaptcha", "verify you are human",
-        "unusual traffic", "attention required", "cf-error-details",
+        "just a moment",
+        "cf-chl",
+        "challenge-platform",
+        "captcha",
+        "hcaptcha",
+        "recaptcha",
+        "verify you are human",
+        "unusual traffic",
+        "attention required",
+        "cf-error-details",
     )
     if any(m in text for m in challenge_markers):
         return "challenge", None
@@ -302,6 +332,7 @@ def _auth_state(result, profile):
 async def fetch_firecrawl(url, max_chars, key, timeout=30):
     """Firecrawl escape hatch: POST /v1/scrape, formats markdown."""
     import httpx
+
     async with httpx.AsyncClient(timeout=timeout) as client:
         r = await client.post(
             "https://api.firecrawl.dev/v1/scrape",
@@ -315,8 +346,12 @@ async def fetch_firecrawl(url, max_chars, key, timeout=30):
         if not md:
             raise RuntimeError("Firecrawl empty result")
         meta = data.get("metadata", {}) or {}
-        return {"title": meta.get("title", ""), "markdown": md[:max_chars],
-                "status_code": r.status_code, "html": ""}
+        return {
+            "title": meta.get("title", ""),
+            "markdown": md[:max_chars],
+            "status_code": r.status_code,
+            "html": "",
+        }
 
 
 def _ladder(strategy, key):
@@ -343,8 +378,7 @@ def _normalize_hit(hit):
         "cached": True,
         "attempts": 1,
         "error": None,
-        "auth": hit.get("auth") or {"profile": None, "authenticated": None,
-                                    "state": "success"},
+        "auth": hit.get("auth") or {"profile": None, "authenticated": None, "state": "success"},
     }
 
 
@@ -360,26 +394,31 @@ async def _crawl4ai_once(crawler, cfg, url, per_url_timeout):
     # Policy: retry once on timeout / transient failures; don't retry auth errors.
     def _no_retry(e):
         msg = str(e).lower()
-        return any(m in msg for m in ("401", "403", "challenge", "captcha",
-                                      "access denied", "forbidden"))
+        return any(
+            m in msg for m in ("401", "403", "challenge", "captcha", "access denied", "forbidden")
+        )
 
     try:
         r = await attempt()
-        return {"title": (r.metadata or {}).get("title", ""),
-                "markdown": (r.markdown or ""),
-                "status_code": getattr(r, "status_code", None),
-                "html": (r.html or "")[:8000]}
+        return {
+            "title": (r.metadata or {}).get("title", ""),
+            "markdown": (r.markdown or ""),
+            "status_code": getattr(r, "status_code", None),
+            "html": (r.html or "")[:8000],
+        }
     except Exception as e:
         if _no_retry(e):
             raise
         await asyncio.sleep(2)
         try:
             r2 = await attempt()
-            return {"title": (r2.metadata or {}).get("title", ""),
-                    "markdown": (r2.markdown or ""),
-                    "status_code": getattr(r2, "status_code", None),
-                    "html": (r2.html or "")[:8000]}
-        except Exception:
+            return {
+                "title": (r2.metadata or {}).get("title", ""),
+                "markdown": (r2.markdown or ""),
+                "status_code": getattr(r2, "status_code", None),
+                "html": (r2.html or "")[:8000],
+            }
+        except Exception:  # noqa: BLE001 - surface original error, retry already done
             raise RuntimeError(str(e)) from e
 
 
@@ -392,15 +431,23 @@ def _effective_cookies(cookies, profile):
     return load_profile_cookies(profile)
 
 
-async def scrape_many(urls, max_chars=6000, per_url_timeout=20, cookies=None,
-                      headers=None, ttl=3600, fresh=False, strategy="auto",
-                      profile=None, no_cache=False):
+async def scrape_many(
+    urls,
+    max_chars=6000,
+    per_url_timeout=20,
+    cookies=None,
+    headers=None,
+    ttl=3600,
+    fresh=False,
+    strategy="auto",
+    profile=None,
+    no_cache=False,
+):
     steps = _ladder(strategy, firecrawl_key())
     results = {}
     missing = []
     for u in urls:
-        hit = None if no_cache else cache_get(u, cookies, headers, max_chars,
-                                              ttl, fresh, profile)
+        hit = None if no_cache else cache_get(u, cookies, headers, max_chars, ttl, fresh, profile)
         if hit:
             results[u] = _normalize_hit(hit)
         else:
@@ -412,6 +459,7 @@ async def scrape_many(urls, max_chars=6000, per_url_timeout=20, cookies=None,
     cfg = None
     if "crawl4ai" in steps:
         from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+
         bc = BrowserConfig(
             use_persistent_context=bool(profile),
             user_data_dir=profile_dir(profile) if profile else None,
@@ -428,29 +476,35 @@ async def scrape_many(urls, max_chars=6000, per_url_timeout=20, cookies=None,
             attempts += 1
             try:
                 if method == "http":
-                    res = await fetch_http(url, max_chars,
-                                           _effective_cookies(cookies, profile),
-                                           headers, timeout=per_url_timeout)
+                    res = await fetch_http(
+                        url,
+                        max_chars,
+                        _effective_cookies(cookies, profile),
+                        headers,
+                        timeout=per_url_timeout,
+                    )
                 elif method == "crawl4ai":
-                    res = await _crawl4ai_once(crawler_ctx, cfg, url,
-                                               per_url_timeout)
+                    res = await _crawl4ai_once(crawler_ctx, cfg, url, per_url_timeout)
                     res["markdown"] = res.get("markdown", "")[:max_chars]
                 elif method == "firecrawl":
-                    res = await fetch_firecrawl(url, max_chars,
-                                                firecrawl_key(),
-                                                timeout=per_url_timeout)
+                    res = await fetch_firecrawl(
+                        url, max_chars, firecrawl_key(), timeout=per_url_timeout
+                    )
                 state, authenticated = _auth_state(res, profile)
                 if state == "success":
                     if len((res.get("markdown") or "").strip()) >= 100:
                         # Valid content - ladder done, no need for next strategy.
-                        auth = {"profile": profile,
-                                "authenticated": authenticated,
-                                "state": state}
-                        out = {"title": res.get("title", ""),
-                               "markdown": res.get("markdown", ""),
-                               "status": "success", "method": method,
-                               "cached": False, "attempts": attempts,
-                               "error": None, "auth": auth}
+                        auth = {"profile": profile, "authenticated": authenticated, "state": state}
+                        out = {
+                            "title": res.get("title", ""),
+                            "markdown": res.get("markdown", ""),
+                            "status": "success",
+                            "method": method,
+                            "cached": False,
+                            "attempts": attempts,
+                            "error": None,
+                            "auth": auth,
+                        }
                         if not no_cache:
                             cache_put(url, cookies, headers, max_chars, out, profile)
                         return url, out
@@ -459,18 +513,23 @@ async def scrape_many(urls, max_chars=6000, per_url_timeout=20, cookies=None,
                 else:
                     # Auth failure: record reason, continue ladder.
                     reasons.append((state, method, _auth_message(state, profile)))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 reasons.append(("error", method, "timeout"))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - record reason, ladder continues
                 reasons.append(("error", method, str(e)))
         # Ladder exhausted: pick best terminal state from all reasons.
         state, authenticated, detail = _terminal_state(reasons, profile)
-        auth = {"profile": profile,
-                "authenticated": authenticated,
-                "state": state}
-        return url, {"title": "", "markdown": "", "status": state,
-                     "method": steps[-1], "cached": False,
-                     "attempts": attempts, "error": detail, "auth": auth}
+        auth = {"profile": profile, "authenticated": authenticated, "state": state}
+        return url, {
+            "title": "",
+            "markdown": "",
+            "status": state,
+            "method": steps[-1],
+            "cached": False,
+            "attempts": attempts,
+            "error": detail,
+            "auth": auth,
+        }
 
     if crawler_ctx is not None:
         async with crawler_ctx:
@@ -484,9 +543,8 @@ async def scrape_many(urls, max_chars=6000, per_url_timeout=20, cookies=None,
                     # lives on browser_manager instead) - go direct.
                     bm = crawler_ctx.crawler_strategy.browser_manager
                     if bm and bm.default_context is not None:
-                        await bm.default_context.storage_state(
-                            path=profile_state_path(profile))
-                except Exception:
+                        await bm.default_context.storage_state(path=profile_state_path(profile))
+                except Exception:  # noqa: BLE001, S110 - state export is best-effort
                     pass
     else:
         for url, res in await asyncio.gather(*(fetch_one(u) for u in missing)):
@@ -509,8 +567,7 @@ def _terminal_state(reasons, profile):
 
 def _auth_message(state, profile):
     if state == "login_required":
-        return ("Authenticated session appears expired or unavailable "
-                f"(profile={profile or 'none'})")
+        return f"Authenticated session appears expired or unavailable (profile={profile or 'none'})"
     if state == "challenge":
         return "Site requires human verification; automatic acquisition stopped"
     if state == "blocked":
@@ -520,6 +577,7 @@ def _auth_message(state, profile):
 
 def search(query, n=5):
     from ddgs import DDGS
+
     return [
         {"title": r["title"], "url": r["href"], "snippet": r.get("body", "")}
         for r in DDGS().text(query, max_results=n)
@@ -532,8 +590,20 @@ def main():
         print(__doc__)
         return
 
-    (args, cookies, headers, max_chars_override, timeout_override,
-     fresh, ttl, json_out, limit, strategy, profile, no_cache) = parse_opts(args)
+    (
+        args,
+        cookies,
+        headers,
+        max_chars_override,
+        timeout_override,
+        fresh,
+        ttl,
+        json_out,
+        limit,
+        strategy,
+        profile,
+        no_cache,
+    ) = parse_opts(args)
 
     if not args:
         print(__doc__)
@@ -557,7 +627,7 @@ def main():
     if cmd == "s":
         n = limit or (int(args[2]) if len(args) > 2 else 5)
         for i, r in enumerate(search(q, n=n)):
-            print(f"{i+1}. {r['title']}\n   {r['url']}\n   {r['snippet'][:200]}\n")
+            print(f"{i + 1}. {r['title']}\n   {r['url']}\n   {r['snippet'][:200]}\n")
 
     elif cmd == "u":
         if q == "-":
@@ -567,9 +637,18 @@ def main():
         max_chars = max_chars_override or 10000
         timeout = timeout_override or 20
         res = asyncio.run(
-            scrape_many(urls, max_chars=max_chars, per_url_timeout=timeout,
-                       cookies=cookies, headers=headers, ttl=ttl, fresh=fresh,
-                       strategy=strategy, profile=profile, no_cache=no_cache)
+            scrape_many(
+                urls,
+                max_chars=max_chars,
+                per_url_timeout=timeout,
+                cookies=cookies,
+                headers=headers,
+                ttl=ttl,
+                fresh=fresh,
+                strategy=strategy,
+                profile=profile,
+                no_cache=no_cache,
+            )
         )
         if json_out:
             print(json.dumps(res, indent=2))
@@ -597,9 +676,18 @@ def main():
         results = search(q, n=n)
         urls = [r["url"] for r in results]
         scraped = asyncio.run(
-            scrape_many(urls, max_chars=max_chars, per_url_timeout=timeout,
-                       cookies=cookies, headers=headers, ttl=ttl, fresh=fresh,
-                       strategy=strategy, profile=profile, no_cache=no_cache)
+            scrape_many(
+                urls,
+                max_chars=max_chars,
+                per_url_timeout=timeout,
+                cookies=cookies,
+                headers=headers,
+                ttl=ttl,
+                fresh=fresh,
+                strategy=strategy,
+                profile=profile,
+                no_cache=no_cache,
+            )
         )
         if json_out:
             out = {}
@@ -616,9 +704,8 @@ def main():
                     "cached": got.get("cached", False),
                     "attempts": got.get("attempts", 0),
                     "error": got.get("error"),
-                    "auth": got.get("auth") or {"profile": None,
-                                                "authenticated": None,
-                                                "state": got.get("status", "")},
+                    "auth": got.get("auth")
+                    or {"profile": None, "authenticated": None, "state": got.get("status", "")},
                 }
             print(json.dumps(out, indent=2))
             return
@@ -628,7 +715,9 @@ def main():
             method = got.get("method", "")
             err = got.get("error") or ""
             fail = stat != "success"
-            print(f"\n{'='*60}\n## {i+1}. {r['title']}  [{stat}/{method}]{'  ' + err if err else ''}\n{'='*60}")
+            print(
+                f"\n{'=' * 60}\n## {i + 1}. {r['title']}  [{stat}/{method}]{'  ' + err if err else ''}\n{'=' * 60}"
+            )
             print(f"URL: {r['url']}")
             print(got.get("markdown", "")[:max_chars] if not fail else "(no content)")
 

@@ -1,11 +1,10 @@
-import os
-import sys
 import pathlib
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import webget  # noqa: E402
+import webget
 
 
 def opts(*args):
@@ -14,12 +13,11 @@ def opts(*args):
 
 
 def auth_state(md="", html="", status=None, profile=None):
-    return webget._auth_state(
-        {"markdown": md, "html": html, "status_code": status}, profile
-    )
+    return webget._auth_state({"markdown": md, "html": html, "status_code": status}, profile)
 
 
 # ---------- parse_opts ----------
+
 
 class TestParseOpts:
     def test_positional(self):
@@ -64,6 +62,7 @@ class TestParseOpts:
 
 # ---------- profile safety ----------
 
+
 class TestProfileSafety:
     def test_valid_names(self):
         for name in ("campus", "campus-2026", "a.b_c", "x1"):
@@ -84,9 +83,12 @@ class TestProfileSafety:
 
 # ---------- auth state classifier ----------
 
+
 class TestAuthState:
     def test_success_public(self):
-        state, authed = auth_state(md="lots of content here", html="<html>..</html>", status=200, profile=None)
+        state, authed = auth_state(
+            md="lots of content here", html="<html>..</html>", status=200, profile=None
+        )
         assert state == "success" and authed is None
 
     def test_success_with_profile(self):
@@ -98,13 +100,21 @@ class TestAuthState:
         assert state == "login_required" and authed is False
 
     def test_login_form_detected(self):
-        html = '<html><form><input type="text"/><input type="password"/></form><h1>Log in</h1></html>'
-        state, authed = auth_state(html=html, status=200)
+        html = (
+            '<html><form><input type="text"/><input type="password"/></form><h1>Log in</h1></html>'
+        )
+        state, _authed = auth_state(html=html, status=200)
         assert state == "login_required"
 
     def test_challenge_markers(self):
-        for marker in ("Just a moment", "cf-chl-opt", "captcha", "hcaptcha",
-                       "Verify you are human", "unusual traffic"):
+        for marker in (
+            "Just a moment",
+            "cf-chl-opt",
+            "captcha",
+            "hcaptcha",
+            "Verify you are human",
+            "unusual traffic",
+        ):
             state, _ = auth_state(md=marker, status=200)
             assert state == "challenge", f"{marker!r} should be challenge"
 
@@ -127,10 +137,11 @@ class TestAuthState:
 
 # ---------- terminal state picker ----------
 
+
 class TestTerminalState:
     def test_priority_challenge_over_login(self):
         reasons = [("login_required", "http", "login"), ("challenge", "crawl4ai", "captcha")]
-        state, authed, detail = webget._terminal_state(reasons, None)
+        state, _authed, _detail = webget._terminal_state(reasons, None)
         assert state == "challenge"
 
     def test_priority_login_over_blocked(self):
@@ -139,7 +150,7 @@ class TestTerminalState:
         assert state == "login_required" and authed is False
 
     def test_empty_reasons(self):
-        state, authed, detail = webget._terminal_state([], None)
+        state, _authed, _detail = webget._terminal_state([], None)
         assert state == "error"
 
     def test_error_fallback(self):
@@ -149,6 +160,7 @@ class TestTerminalState:
 
 
 # ---------- ladder ----------
+
 
 class TestLadder:
     def test_auto_includes_http_and_crawl4ai(self):
@@ -179,6 +191,7 @@ class TestLadder:
 
 
 # ---------- cache isolation ----------
+
 
 class TestCacheIsolation:
     def test_public_vs_profile(self):
