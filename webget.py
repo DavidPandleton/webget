@@ -327,11 +327,19 @@ def _auth_state(result, profile):
         return "challenge", None
 
     # Login page / form detection.
-    has_password = "<input" in html and 'type="password"' in html
+    has_password_input = "<input" in html and 'type="password"' in html
     login_words = any(w in text for w in ("log in", "login", "sign in", "signin"))
+    # Sites like SION use JS show/hide instead of type=password and label
+    # fields as "NIM" / "Username". Catch credential-labeled forms too.
+    has_credential_labels = "password" in text and any(
+        w in text for w in ("nim", "username", "user id", "email")
+    )
+    has_show_password = "show password" in text
     if status == 401:
         return "login_required", False
-    if has_password and login_words:
+    if has_password_input and login_words:
+        return "login_required", False
+    if has_credential_labels or has_show_password:
         return "login_required", False
     if status == 403:
         # 403 + login/session markers -> login_required; generic 403 -> blocked

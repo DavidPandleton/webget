@@ -110,6 +110,12 @@ class TestAuthState:
         state, _authed = auth_state(html=html, status=200)
         assert state == "login_required"
 
+    def test_sion_style_login_detected(self):
+        # SION uses JS show/hide (no type=password) and NIM labels.
+        md = "SION ITB STIKOM Bali NIM Mahasiswa Password Lupa password SION? Show Password"
+        state, _authed = auth_state(md=md, status=200)
+        assert state == "login_required"
+
     def test_challenge_markers(self):
         for marker in (
             "Just a moment",
