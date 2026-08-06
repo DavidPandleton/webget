@@ -28,14 +28,6 @@ from http_server import TestServer
 import webget_cli as webget
 
 
-def pct(values, p):
-    if not values:
-        return 0.0
-    s = sorted(values)
-    idx = min(len(s) - 1, int(len(s) * p))
-    return s[idx]
-
-
 async def run_scale(server, urls, strategy, use_cache, max_concurrency=None):
     """Fetch all urls in one bounded batch, return summary metrics."""
     t0 = time.perf_counter()
