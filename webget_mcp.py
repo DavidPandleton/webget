@@ -36,6 +36,8 @@ except ImportError:  # pragma: no cover
 
 mcp = FastMCP("webget")
 
+_VALID_STRATEGIES = ("auto", "http", "crawl4ai", "firecrawl")
+
 
 @mcp.tool()
 async def search(query: str, n: int = 5) -> list[dict]:
@@ -56,6 +58,10 @@ async def fetch(
     strategy: auto|http|crawl4ai|firecrawl. Status values:
     success|login_required|challenge|blocked|error.
     """
+    if strategy not in _VALID_STRATEGIES:
+        return {"status": "error", "error": f"unknown strategy: {strategy}"}
+    if strategy == "firecrawl" and not wg.firecrawl_key():
+        return {"status": "error", "error": "WEBGET_FIRECRAWL_KEY not set"}
     res = await wg.scrape_many(
         [url],
         max_chars=max_chars,
