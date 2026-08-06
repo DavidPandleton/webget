@@ -611,13 +611,13 @@ async def scrape_many(
 
     # Ladder exhausted for the rest: terminal state from all recorded reasons.
     for url in pending:
-        state, authenticated, detail = _terminal_state(reasons[url], profile)
+        state, authenticated, detail, method = _terminal_state(reasons[url], profile)
         auth = {"profile": profile, "authenticated": authenticated, "state": state}
         results[url] = {
             "title": "",
             "markdown": "",
             "status": state,
-            "method": steps[-1],
+            "method": method,
             "cached": False,
             "attempts": attempts[url],
             "error": detail,
@@ -635,8 +635,10 @@ def _terminal_state(reasons, profile):
                 authenticated = None
                 if state == "login_required":
                     authenticated = False
-                return state, authenticated, detail
-    return "error", None, "; ".join(d for _, _, d in reasons)
+                return state, authenticated, detail, method
+    first = reasons[0] if reasons else None
+    method = first[1] if first else ""
+    return "error", None, "; ".join(d for _, _, d in reasons), method
 
 
 def _auth_message(state, profile):

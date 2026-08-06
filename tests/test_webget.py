@@ -152,22 +152,22 @@ class TestAuthState:
 class TestTerminalState:
     def test_priority_challenge_over_login(self):
         reasons = [("login_required", "http", "login"), ("challenge", "crawl4ai", "captcha")]
-        state, _authed, _detail = webget._terminal_state(reasons, None)
-        assert state == "challenge"
+        state, _authed, _detail, method = webget._terminal_state(reasons, None)
+        assert state == "challenge" and method == "crawl4ai"
 
     def test_priority_login_over_blocked(self):
         reasons = [("blocked", "http", "403"), ("login_required", "crawl4ai", "401")]
-        state, authed, _ = webget._terminal_state(reasons, None)
-        assert state == "login_required" and authed is False
+        state, authed, _detail, method = webget._terminal_state(reasons, None)
+        assert state == "login_required" and authed is False and method == "crawl4ai"
 
     def test_empty_reasons(self):
-        state, _authed, _detail = webget._terminal_state([], None)
-        assert state == "error"
+        state, _authed, _detail, method = webget._terminal_state([], None)
+        assert state == "error" and method == ""
 
     def test_error_fallback(self):
         reasons = [("error", "http", "timeout"), ("error", "crawl4ai", "boom")]
-        state, _, detail = webget._terminal_state(reasons, None)
-        assert state == "error" and "timeout" in detail
+        state, _authed, detail, method = webget._terminal_state(reasons, None)
+        assert state == "error" and "timeout" in detail and method == "http"
 
 
 # ---------- ladder ----------
