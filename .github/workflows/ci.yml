@@ -26,7 +26,8 @@ jobs:
       - name: Lint
         run: ruff check webget_cli.py webget_mcp.py tests
       - name: Test
-        run: pytest
+        # MCP tests need the mcp SDK: run in the dedicated mcp-test job.
+        run: pytest --ignore=tests/test_mcp_server.py --ignore=tests/test_mcp_smoke.py
 
   mcp-test:
     runs-on: ubuntu-latest
