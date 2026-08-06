@@ -187,11 +187,21 @@ class _Handler(BaseHTTPRequestHandler):
                 port = self.server.server_address[1]
                 self._send(302, headers={"Location": f"http://127.0.0.1:{port}/private"})
                 return
+            if path == "/redirect-private-page":
+                # Same bait but landing on a crawl4ai-extractable page.
+                port = self.server.server_address[1]
+                self._send(302, headers={"Location": f"http://127.0.0.1:{port}/private-page"})
+                return
 
             # --- SSRF bait endpoints (they must never be reachable from a
             #     properly-guarded client) ---
             if path == "/private":
                 self._send(200, b"PRIVATE DATA LEAKED " + LONG_BODY.encode())
+                return
+            if path == "/private-page":
+                # Normal HTML page (crawl4ai-extractable) that only exists on
+                # loopback: the SSRF probe target for browser-strategy tests.
+                self._page(title="Private Page", body="PRIVATE DATA LEAKED " + LONG_BODY)
                 return
             if path == "/metadata":
                 self._send(200, b"role: arn:aws:iam::123456789012:role/fake")
@@ -229,6 +239,23 @@ class _Handler(BaseHTTPRequestHandler):
                 while sent < total:
                     self.wfile.write(chunk[: min(len(chunk), total - sent)])
                     sent += len(chunk[: min(len(chunk), total - sent)])
+                return
+            if path == "/oversize":
+                # 30MB body, over MAX_RESPONSE_BYTES (25MB): the client must
+                # abort while streaming, before buffering the whole thing.
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(30 * 1024 * 1024))
+                self.end_headers()
+                chunk = b"y" * 65536
+                total = 30 * 1024 * 1024
+                sent = 0
+                try:
+                    while sent < total:
+                        self.wfile.write(chunk[: min(len(chunk), total - sent)])
+                        sent += len(chunk[: min(len(chunk), total - sent)])
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # client aborted mid-stream: expected
                 return
 
             # --- bench inventory ---

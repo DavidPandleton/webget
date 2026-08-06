@@ -274,10 +274,16 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
         from urllib.parse import urlparse
 
         host = (urlparse(url).hostname or "").lower()
+        now = time.time()
         if host:
             for c in cookies:
                 d = (c.get("domain") or "").lstrip(".").lower()
                 if d and (host == d or host.endswith("." + d)):
+                    exp = c.get("expires") or -1
+                    # Skip expired cookies: session cookies (expires<0) and
+                    # future-expiry cookies are sent; past-expiry are not.
+                    if 0 <= exp < now:
+                        continue
                     cj[c["name"]] = c["value"]
 
     current = url
@@ -288,40 +294,42 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
         while True:
             if _is_private_target(current):
                 raise SSRFError(f"blocked by SSRF guard: private address {current}")
-            r = await client.get(current)
-            if r.status_code in (301, 302, 303, 307, 308):
-                loc = r.headers.get("location")
-                if not loc:
-                    break
-                redirects += 1
-                if redirects > 20:
-                    raise RuntimeError("too many redirects")
-                current = str(httpx.URL(current).join(loc))
-                continue
-            break
-        ctype = r.headers.get("content-type", "")
-        if "html" not in ctype and "text" not in ctype:
-            raise RuntimeError(f"not HTML ({ctype or 'unknown'})")
-        # Read with a hard cap so a giant/binary body cannot exhaust memory.
-        chunks = []
-        total = 0
-        async for chunk in r.aiter_bytes():
-            total += len(chunk)
-            if total > MAX_RESPONSE_BYTES:
-                raise RuntimeError(f"response too large (> {MAX_RESPONSE_BYTES} bytes)")
-            chunks.append(chunk)
-        html = b"".join(chunks).decode("utf-8", errors="replace")
-        title = ""
-        m = re.search(r"<title[^>]*>(.*?)</title>", html, re.DOTALL | re.IGNORECASE)
-        if m:
-            title = re.sub(r"\s+", " ", m.group(1)).strip()
-        md = await asyncio.to_thread(_extract_markdown, html)
-        return {
-            "title": title,
-            "markdown": md[:max_chars],
-            "status_code": r.status_code,
-            "html": html[:8000],
-        }
+            # stream=True is REQUIRED: client.get() would buffer the whole
+            # body into memory before our cap could stop it.
+            async with client.stream("GET", current) as r:
+                if r.status_code in (301, 302, 303, 307, 308):
+                    loc = r.headers.get("location")
+                    if not loc:
+                        break
+                    redirects += 1
+                    if redirects > 20:
+                        raise RuntimeError("too many redirects")
+                    current = str(httpx.URL(current).join(loc))
+                    continue
+                ctype = r.headers.get("content-type", "")
+                if "html" not in ctype and "text" not in ctype:
+                    raise RuntimeError(f"not HTML ({ctype or 'unknown'})")
+                # Read with a hard cap while streaming, so a giant/binary
+                # body cannot exhaust memory.
+                chunks = []
+                total = 0
+                async for chunk in r.aiter_bytes():
+                    total += len(chunk)
+                    if total > MAX_RESPONSE_BYTES:
+                        raise RuntimeError(f"response too large (> {MAX_RESPONSE_BYTES} bytes)")
+                    chunks.append(chunk)
+                html = b"".join(chunks).decode("utf-8", errors="replace")
+                title = ""
+                m = re.search(r"<title[^>]*>(.*?)</title>", html, re.DOTALL | re.IGNORECASE)
+                if m:
+                    title = re.sub(r"\s+", " ", m.group(1)).strip()
+                md = await asyncio.to_thread(_extract_markdown, html)
+                return {
+                    "title": title,
+                    "markdown": md[:max_chars],
+                    "status_code": r.status_code,
+                    "html": html[:8000],
+                }
 
 
 def _warn(msg):
@@ -346,7 +354,7 @@ _PRIVATE_IP_CACHE = {}
 
 def _ip_is_private(ip):
     return (
-        ip.is_loopback
+        False
         or ip.is_private
         or ip.is_link_local
         or ip.is_reserved
@@ -383,7 +391,9 @@ def _is_private_target(url, allow_private=None):
     host = urlparse(url).hostname
     if not host:
         return False  # malformed URL; other validation handles it
-    host = host.strip("[]").lower()  # IPv6 literals come as [::1]
+    host = host.strip("[]").lower()
+    # FQDN root notation: '127.0.0.1.' and 'localhost.' are the same hosts.
+    host = host.rstrip(".")
     try:
         ip = ipaddress.ip_address(host)
         return _ip_is_private(ip)
@@ -395,13 +405,85 @@ class SSRFError(RuntimeError):
     """Raised when a fetch would target a private address."""
 
 
-async def _ssrf_hook(request):
-    if _is_private_target(str(request.url)):
-        raise SSRFError(f"blocked by SSRF guard: private address {request.url.host}")
+async def _guard_browser_routes(crawler_ctx):
+    """Install a Playwright route guard so the browser can never request a
+    private address, even through redirects or subresources.
 
+    Crawl4AI does not expose a per-hop URL hook, and Playwright route
+    handlers only fire for the FIRST request of a redirect chain. So:
+    - navigation requests are fetched manually hop-by-hop (max_redirects=0)
+      with the SSRF policy checked at every hop before fulfilling;
+    - subresources are checked on their initial URL and aborted if private
+      (a redirect INSIDE a subresource is a documented residual risk: the
+      browser may still follow it, but subresource content never reaches
+      webget's markdown output).
+    """
+    try:
+        bm = crawler_ctx.crawler_strategy.browser_manager
+        browser = bm.default_context if bm else None
+        if browser is None or not hasattr(browser, "on"):
+            return
+    except Exception:  # noqa: BLE001 - guard is best-effort; pre-check still applies
+        return
 
-def _allow_private():
-    return os.environ.get("WEBGET_ALLOW_PRIVATE") == "1"
+    async def guard(route, request):
+        from urllib.parse import urljoin
+
+        if _is_private_target(request.url):
+            try:
+                await route.abort()
+            except Exception:  # noqa: BLE001, S110 - already aborted
+                pass
+            return
+        if not request.is_navigation_request():
+            try:
+                await route.continue_()
+            except Exception:  # noqa: BLE001, S110 - route already handled
+                pass
+            return
+        # Navigation: follow hops manually, checking each one.
+        url = request.url
+        for _hop in range(21):
+            if _is_private_target(url):
+                try:
+                    await route.abort()
+                except Exception:  # noqa: BLE001, S110 - already aborted
+                    pass
+                return
+            try:
+                resp = await route.fetch(url=url, max_redirects=0)
+            except Exception:  # noqa: BLE001 - let the browser handle errors
+                try:
+                    await route.continue_()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+                return
+            if resp.status in (301, 302, 303, 307, 308):
+                loc = resp.headers.get("location")
+                if not loc:
+                    break
+                url = urljoin(url, loc)
+                continue
+            try:
+                await route.fulfill(response=resp)
+            except Exception:  # noqa: BLE001, S110 - page closed
+                pass
+            return
+        try:
+            await route.abort()
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+    async def register(ctx):
+        try:
+            await ctx.route("**/*", guard)
+        except Exception:  # noqa: BLE001, S110 - context closing; skip
+            pass
+
+    for ctx in list(browser.contexts):
+        await register(ctx)
+    # Crawl4AI may create the crawling context lazily on first navigation.
+    browser.on("context", lambda ctx: asyncio.create_task(register(ctx)))
 
 
 PROFILE_DIR = os.path.expanduser("~/.local/share/webget/profiles")
@@ -712,6 +794,7 @@ async def scrape_many(
                 )
                 cfg = CrawlerRunConfig()
                 async with AsyncWebCrawler(config=bc, verbose=False) as crawler_ctx:
+                    await _guard_browser_routes(crawler_ctx)
 
                     async def crawl_one(url):
                         async with sem:
