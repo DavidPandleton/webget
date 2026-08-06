@@ -35,13 +35,15 @@ Changelog = "https://github.com/DavidPandleton/webget/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 browser = ["crawl4ai>=0.9"]
+mcp = ["fastmcp>=2"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
 webget = "webget_cli:main"
+webget-mcp = "webget_mcp:main"
 
 [tool.setuptools]
-py-modules = ["webget_cli"]
+py-modules = ["webget_cli", "webget_mcp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
