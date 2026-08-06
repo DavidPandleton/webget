@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import statistics
 import sys
 import tempfile
 import time
@@ -24,8 +23,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
-import webget_cli as webget  # noqa: E402
-from http_server import TestServer  # noqa: E402
+from http_server import TestServer
+
+import webget_cli as webget
 
 
 def pct(values, p):

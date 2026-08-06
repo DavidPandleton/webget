@@ -87,7 +87,6 @@ class TestCacheConcurrency:
     def test_no_partial_file_on_write(self, isolated_env):
         """Atomic write: cache_put must write via tmp + os.replace, so a
         crash mid-write can never leave a truncated file at the real path."""
-        import webget_cli as wg
 
         url = "https://atomic.test/page"
         real_replace = os.replace

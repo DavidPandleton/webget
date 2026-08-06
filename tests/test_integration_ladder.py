@@ -12,7 +12,6 @@ Covers:
 All tests target the LOCAL server (deterministic), never external sites.
 """
 import asyncio
-import json
 import os
 
 import pytest
