@@ -37,11 +37,27 @@ except ImportError:  # pragma: no cover
 mcp = FastMCP("webget")
 
 _VALID_STRATEGIES = ("auto", "http", "crawl4ai", "firecrawl")
+_MAX_SEARCH_N = 50
+_MAX_MAX_CHARS = 1_000_000
+_MAX_TIMEOUT = 120
+
+
+def _clamp(name, value, lo, hi):
+    """Reject out-of-range numeric input instead of silently accepting
+    abusive values (n=10**9, max_chars=10**9, timeout=-5)."""
+    if not isinstance(value, int):
+        return f"{name} must be an integer"
+    if value < lo or value > hi:
+        return f"{name} must be between {lo} and {hi}"
+    return None
 
 
 @mcp.tool()
 async def search(query: str, n: int = 5) -> list[dict]:
     """Search the web (DuckDuckGo). Returns up to n results with title/url/snippet."""
+    err = _clamp("n", n, 1, _MAX_SEARCH_N)
+    if err:
+        return [{"error": err}]
     return await asyncio.to_thread(wg.search, query, n)
 
 
@@ -62,6 +78,13 @@ async def fetch(
         return {"status": "error", "error": f"unknown strategy: {strategy}"}
     if strategy == "firecrawl" and not wg.firecrawl_key():
         return {"status": "error", "error": "WEBGET_FIRECRAWL_KEY not set"}
+    for name, value, lo, hi in (
+        ("max_chars", max_chars, 100, _MAX_MAX_CHARS),
+        ("timeout", timeout, 1, _MAX_TIMEOUT),
+    ):
+        err = _clamp(name, value, lo, hi)
+        if err:
+            return {"status": "error", "error": err}
     res = await wg.scrape_many(
         [url],
         max_chars=max_chars,
@@ -85,6 +108,14 @@ async def search_fetch(
     Returns one entry per URL with rank, search snippet, and scrape result
     (status/method/markdown).
     """
+    for name, value, lo, hi in (
+        ("n", n, 1, _MAX_SEARCH_N),
+        ("max_chars", max_chars, 100, _MAX_MAX_CHARS),
+        ("timeout", timeout, 1, _MAX_TIMEOUT),
+    ):
+        err = _clamp(name, value, lo, hi)
+        if err:
+            return [{"error": err}]
     results = await asyncio.to_thread(wg.search, query, n)
     urls = [r["url"] for r in results]
     scraped = await wg.scrape_many(
