@@ -5,6 +5,30 @@ All notable changes to webget are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-06
+
+### Added
+- MCP server (`webget_mcp.py`) exposing `search`, `fetch`, and
+  `search_fetch` as MCP tools over stdio, so agents (e.g. opencode) can use
+  the same acquisition ladder without API keys. Register via the new
+  `webget-mcp` entry point or `python webget_mcp.py`.
+- `mcp` optional extra (`fastmcp>=2`): `pip install "webget-cli[mcp]"`.
+- MCP server tests (`tests/test_mcp_server.py`, `tests/test_mcp_smoke.py`)
+  and a dedicated `mcp-test` CI job; lint now covers `webget_mcp.py`.
+- README: MCP server section with opencode registration example, and a
+  documented limitation (MCP tools do not expose `--profile`/`--cookies`).
+
+### Fixed
+- Terminal state now reports the method of the winning ladder reason
+  instead of the last ladder step (e.g. `blocked` from HTTP is no longer
+  reported as method `crawl4ai`).
+- When Crawl4AI is not installed, the ladder no longer clears pending URLs:
+  firecrawl fallback still runs and terminal state is written per URL.
+- MCP `fetch` guards invalid `strategy` values and `firecrawl` without
+  `WEBGET_FIRECRAWL_KEY`, returning an error payload instead of letting
+  `SystemExit` kill the whole server process.
+- Profile state path test is OS-agnostic (`os.path.join`).
+
 ## [0.6.0] - 2026-08-05
 
 ### Added
@@ -112,3 +136,6 @@ All notable changes to webget are documented here. Format follows
 - Initial release: DuckDuckGo search (`s`), Crawl4AI scrape (`u`), search +
   scrape (`su`), batch stdin, `-c`/`-H`/`-n`/`-t` options, JSON output.
 - Zero API keys, unlimited usage.
+
+[0.7.0]: https://github.com/DavidPandleton/webget/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/DavidPandleton/webget/compare/v0.5.0...v0.6.0
