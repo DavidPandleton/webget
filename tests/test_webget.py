@@ -201,6 +201,84 @@ class TestLadder:
             pass
 
 
+# ---------- scrape_many terminal method reporting ----------
+
+
+class TestScrapeManyTerminalMethod:
+    """Regression: method in a terminal result must be the winning reason's
+    method, not steps[-1] (e.g. blocked/http wins over error/crawl4ai)."""
+
+    def test_terminal_method_is_winning_reason(self):
+        import asyncio
+        import sys
+        import types
+
+        async def fake_http(url, max_chars, cookies=None, headers=None, timeout=15):
+            return {
+                "title": "",
+                "markdown": "Forbidden",
+                "status_code": 403,
+                "html": "<h1>Forbidden</h1>",
+            }
+
+        async def fake_crawl4ai(crawler, cfg, url, per_url_timeout):
+            raise RuntimeError("boom")
+
+        async def fake_firecrawl(url, max_chars, key, timeout=15):
+            raise RuntimeError("fc boom")
+
+        class FakeCrawler:
+            crawler_strategy = None
+
+            def __init__(self, *a, **k):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+        fake_mod = types.ModuleType("crawl4ai")
+        fake_mod.AsyncWebCrawler = FakeCrawler
+        fake_mod.BrowserConfig = lambda **k: None
+        fake_mod.CrawlerRunConfig = lambda: None
+
+        orig_http, orig_c4 = webget.fetch_http, webget._crawl4ai_once
+        orig_fc = getattr(webget, "fetch_firecrawl", None)
+        had_c4 = "crawl4ai" in sys.modules
+        webget.fetch_http = fake_http
+        webget._crawl4ai_once = fake_crawl4ai
+        webget.fetch_firecrawl = fake_firecrawl
+        sys.modules["crawl4ai"] = fake_mod
+        try:
+            res = asyncio.run(
+                webget.scrape_many(
+                    ["https://x.test/"],
+                    max_chars=1000,
+                    no_cache=True,
+                    strategy="auto",
+                )
+            )
+        finally:
+            webget.fetch_http = orig_http
+            webget._crawl4ai_once = orig_c4
+            if orig_fc is None:
+                del webget.fetch_firecrawl
+            else:
+                webget.fetch_firecrawl = orig_fc
+            if had_c4:
+                sys.modules["crawl4ai"] = __import__("crawl4ai")
+            else:
+                del sys.modules["crawl4ai"]
+
+        out = res["https://x.test/"]
+        # ladder = [http, crawl4ai, (firecrawl if key)]; http -> blocked (wins)
+        # old bug reported steps[-1] == "crawl4ai" (or "firecrawl")
+        assert out["status"] == "blocked"
+        assert out["method"] == "http"
+
+
 # ---------- cache isolation ----------
 
 
