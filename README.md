@@ -178,6 +178,37 @@ fetches never collide. Failures are never cached.
 > **Privacy note:** cached content is plaintext JSON on disk. If you fetch
 > authenticated/personal pages, use `--no-cache`.
 
+## MCP server
+
+`webget_mcp.py` exposes the same ladder as an MCP server (`search`,
+`fetch`, `search_fetch`), so agents like opencode can search and scrape
+without API keys:
+
+```bash
+pip install "webget-cli[mcp]"
+```
+
+Register as a local MCP server in opencode:
+
+```jsonc
+{
+  "mcp": {
+    "webget": {
+      "type": "local",
+      "command": ["webget-mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+Then prompt with `use webget` for search and scrape tasks. Run the server
+standalone with `webget-mcp` (stdio transport) or `python webget_mcp.py`.
+
+> **Limitation:** MCP tools do not expose `--profile`/`--cookies`, so
+> authenticated pages are out of scope for the MCP server. Use the CLI
+> (`webget login`, `webget u --profile ...`) for session-based fetching.
+
 ## Development
 
 ```bash
