@@ -205,6 +205,10 @@ Register as a local MCP server in opencode:
 Then prompt with `use webget` for search and scrape tasks. Run the server
 standalone with `webget-mcp` (stdio transport) or `python webget_mcp.py`.
 
+> **Limitation:** MCP tools do not expose `--profile`/`--cookies`, so
+> authenticated pages are out of scope for the MCP server. Use the CLI
+> (`webget login`, `webget u --profile ...`) for session-based fetching.
+
 ## Development
 
 ```bash
