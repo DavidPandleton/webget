@@ -217,3 +217,103 @@ feature at this scale; the abstractions proposed (provider registry,
 typed error taxonomy) were considered and NOT implemented — they would add
 complexity without a measurable benefit for a ~1250-line tool. The one
 worthwhile extraction done: `_prune_storage_cookies` (testability).
+
+---
+
+# Phase 11 — Security + Correctness Review (2026-08-06, second pass)
+
+Reviewed branch audit/deep-audit against the Phase 1-10 claims. Findings
+below are NEW items found during this review, not the original audit.
+
+## New bugs found + fixed
+
+1. **CRITICAL (found, fixed): browser-strategy SSRF bypass via redirect.**
+   - Claim in Phase 1-10 report ("SSRF at three layers") was WRONG for the
+     browser path: crawl4ai follows redirects inside Chromium and no
+     per-hop check existed. A public URL 302->127.0.0.1 leaked private
+     content through the crawl4ai strategy (reproduced: success + markdown
+     contained "PRIVATE DATA LEAKED").
+   - Root cause: Playwright route handlers only fire for the FIRST request
+     of a redirect chain (verified experimentally); Crawl4AI does not
+     expose a per-hop hook; CrawlResult does not expose the final URL.
+   - Fix: `_guard_browser_routes()` - Playwright route guard that (a)
+     aborts any request whose URL is private, (b) for navigation requests
+     follows redirects MANUALLY via route.fetch(max_redirects=0) checking
+     every hop, (c) fulfills the final response. Registered on existing
+     contexts + lazy contexts via browser.on("context").
+   - Residual risk (documented): a redirect INSIDE a subresource (img/script)
+     is not hop-checked; subresource content never reaches markdown output.
+   - Regression tests: tests/test_browser_ssrf.py (needs [browser] extra).
+   - Mutation-verified: disabling the hop check -> test FAILS (leak).
+
+2. **MEDIUM (found, fixed): response size cap was NOT streaming.**
+   - Claim "enforced while streaming" was WRONG: client.get() buffers the
+     entire body before aiter_bytes() runs (verified: is_stream_consumed
+     True right after get()). A 2GB response would OOM before the cap fired.
+   - Fix: client.stream("GET", ...) + aiter_bytes() with the cap inside the
+     loop. /oversize (30MB) test proves memory stays bounded (maxrss delta
+     < 10MB) and the fetch aborts.
+   - Tests: tests/test_size_review.py.
+
+3. **LOW (found, fixed): expired cookies still sent by HTTP path.**
+   - _profile_meta reports a session "expired" but fetch_http still sent the
+     cookie (server accepted it -> inconsistent). Fix: skip cookies with
+     0 <= expires < now when building the cookie jar.
+   - Test: test_expired_session_detected.
+
+4. **LOW (found, fixed): dead code in SSRF module.**
+   - `_ssrf_hook` (unused) and `_allow_private` (unused) removed.
+
+## Review findings that were NOT bugs
+
+- `127.0.0.1./x` (trailing dot): guard missed it initially -> fixed with
+  host.rstrip("."). Now blocked. (trailing-dot FQDN of a literal)
+- allow-private env parsing: only exact "1" enables ("true"/"yes"/"" do
+  not) - tested.
+- MCP subprocess does NOT inherit WEBGET_FIRECRAWL_KEY/WEBGET_ALLOW_PRIVATE:
+  the mcp SDK spawns with a SAFE default environment (HOME/PATH/USER/etc).
+  This is GOOD for security (MCP server always runs default-blocked, keys
+  never leak into the subprocess) but means MCP firecrawl needs explicit
+  env in the client config - documented limitation.
+- Concurrency: Semaphore with 0/-1 raises or no-ops safely (tested);
+  exceptions inside workers release the semaphore (tested); no leaked tasks
+  after batch (tested); cancellation does not hang (tested).
+- Cache: atomic tmp+os.replace verified via spy; no .tmp leftovers;
+  concurrent writers produce valid JSON; readers never see partial writes;
+  _write_json (logout) also atomic.
+
+## DNS rebinding / TOCTOU assessment
+
+`_is_private_target()` resolves hostname -> checks IP -> fetch resolves
+AGAIN at connect time. DNS rebinding (attacker answers public on check,
+private on connect) is theoretically possible. httpx/httpcore expose NO
+resolver pinning (verified: AsyncHTTPTransport has no resolver parameter).
+Pinning would require a custom network backend, breaks Host/SNI/proxy, and
+is fragile. For a local CLI where the operator must voluntarily fetch an
+attacker hostname, complexity is not justified. Documented as residual
+risk; GitHub issue #9 opened with severity + future approaches.
+
+## Mutation testing (Phase 11 pass)
+
+| Mutation | Result |
+|----------|--------|
+| SSRF literal check disabled | caught (loopback cases via is_private) |
+| hostname resolution returns False | caught (127.1, decimal, hex IPs) |
+| semaphore unbounded | caught (3 tests) |
+| browser hop check disabled | caught (leak test FAILS) |
+
+## Benchmark after fixes (no regression)
+
+500 URLs http: 55.3 req/s (before: 55.5), p50 ~167-170ms. Streaming cap
+and SSRF hop checks add negligible overhead on the local benchmark.
+
+## Final gate (Phase 11)
+
+SECURITY REVIEW: PASS (browser bypass fixed, guard mutation-verified)
+CORRECTNESS REVIEW: PASS
+PERFORMANCE REVIEW: PASS (no regression)
+MCP REVIEW: PASS (leak scan clean, recovery verified)
+PACKAGING REVIEW: PASS (build + clean install + smoke from artifact)
+READY TO MERGE: YES (branch audit/deep-audit, pending user approval)
+READY TO TAG: NO (version decision pending, no bump without approval)
+READY TO PUBLISH: NO (requires explicit approval)
