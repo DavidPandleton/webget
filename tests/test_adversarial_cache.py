@@ -85,14 +85,30 @@ class TestCacheConcurrency:
         assert data["status"] == "success"
 
     def test_no_partial_file_on_write(self, isolated_env):
-        """Atomic write: a mid-write crash must not leave a truncated file.
-        Simulated by checking that cache_put is atomic (tmp + rename):
-        the target path must never exist in a half-written state."""
+        """Atomic write: cache_put must write via tmp + os.replace, so a
+        crash mid-write can never leave a truncated file at the real path."""
+        import webget_cli as wg
+
         url = "https://atomic.test/page"
-        webget.cache_put(url, None, None, 1000, {"status": "success", "x": "y" * 5000}, None)
-        with open(webget._cache_path(url, None, None, 1000, None)) as f:
-            data = json.load(f)
-        assert data["x"] == "y" * 5000
+        real_replace = os.replace
+        calls = []
+
+        def spy(src, dst):
+            calls.append((src, dst))
+            return real_replace(src, dst)
+
+        os.replace = spy
+        try:
+            webget.cache_put(url, None, None, 1000, {"status": "success", "x": "y" * 5000}, None)
+        finally:
+            os.replace = real_replace
+
+        assert calls, "cache_put must use os.replace (tmp + rename)"
+        tmp, dst = calls[0]
+        assert tmp.endswith(".tmp")
+        assert dst == webget._cache_path(url, None, None, 1000, None)
+        with open(dst) as f:
+            assert json.load(f)["x"] == "y" * 5000
 
 
 class TestCacheBehavior:

@@ -110,6 +110,31 @@ class TestRepeatedCalls:
         assert _run(run()) == [False] * 5
 
 
+class TestInputCaps:
+    """Out-of-range numeric inputs must return error payloads, not run."""
+
+    @pytest.mark.parametrize(
+        "tool,args",
+        [
+            ("search", {"query": "x", "n": 10**9}),
+            ("fetch", {"url": "https://example.com", "max_chars": 10**9}),
+            ("fetch", {"url": "https://example.com", "timeout": -5}),
+            ("search_fetch", {"query": "x", "n": 10**9}),
+            ("search_fetch", {"query": "x", "max_chars": 10**9}),
+        ],
+    )
+    def test_extreme_values_return_error(self, tool, args):
+        async def run():
+            params = StdioServerParameters(command=sys.executable, args=[str(MCP)])
+            async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+                await session.initialize()
+                res = await session.call_tool(tool, args)
+                return res
+
+        res = _run(run())
+        assert "must be between" in res.content[0].text or res.isError
+
+
 class TestToolFailureIsolation:
     def test_bogus_then_good_same_session(self):
         """A failed call must not poison subsequent calls in the session."""
