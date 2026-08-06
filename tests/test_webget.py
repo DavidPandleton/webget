@@ -1,3 +1,4 @@
+import os
 import pathlib
 import sys
 
@@ -82,7 +83,7 @@ class TestProfileSafety:
 
     def test_profile_state_path_safe(self):
         p = webget.profile_state_path("campus")
-        assert p.endswith("campus/storage_state.json")
+        assert p.endswith(os.path.join("campus", "storage_state.json"))
 
 
 # ---------- auth state classifier ----------
