@@ -1,5 +1,6 @@
 """Phase 11 MCP data-leakage review: outputs must never expose secrets,
 filesystem paths, cookies, headers, API keys, or internal tracebacks."""
+
 import asyncio
 import json
 import sys
@@ -22,7 +23,7 @@ LEAK_MARKERS = [
     "profiles/",
     "/home/",
     "Traceback",
-    "File \"",
+    'File "',
     "line ",
 ]
 
@@ -96,18 +97,30 @@ class TestNoSecretLeakage:
         res = _run(run())
         payload = json.loads(res.content[0].text)
         for entry in payload:
-            assert {"rank", "search_title", "snippet", "scrape_title", "markdown",
-                    "status", "method", "cached", "error"} <= set(entry)
+            assert {
+                "rank",
+                "search_title",
+                "snippet",
+                "scrape_title",
+                "markdown",
+                "status",
+                "method",
+                "cached",
+                "error",
+            } <= set(entry)
 
 
 class TestServerRecovery:
     def test_bad_then_good_sequence(self):
         """bad request -> error -> server alive -> valid request succeeds."""
+
         async def run():
             params = StdioServerParameters(command=sys.executable, args=[str(MCP)])
             async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
                 await session.initialize()
-                bad = await session.call_tool("fetch", {"url": "https://example.com", "strategy": "bogus"})
+                bad = await session.call_tool(
+                    "fetch", {"url": "https://example.com", "strategy": "bogus"}
+                )
                 assert not bad.isError or "error" in bad.content[0].text
                 good = await session.call_tool(
                     "fetch", {"url": "https://example.com", "strategy": "http", "no_cache": True}

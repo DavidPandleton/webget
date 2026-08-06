@@ -17,6 +17,7 @@ Usage (conftest fixture):
 Benchmark usage:
     python -m tests.http_server --bench  (prints the URL inventory)
 """
+
 from __future__ import annotations
 
 import gzip
@@ -24,6 +25,7 @@ import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import ClassVar
 
 PAGE_HTML = """<!DOCTYPE html>
 <html><head><title>{title}</title></head>
@@ -42,6 +44,10 @@ class _Handler(BaseHTTPRequestHandler):
     max_active = 0
     hits = 0
     lock = threading.Lock()
+    # Per-path hit counters: used by SSRF tests to PROVE that a private
+    # endpoint never received a request (not merely that its response was
+    # discarded after the request happened).
+    path_hits: ClassVar[dict[str, int]] = {}
 
     def log_message(self, *args):  # silence
         pass
@@ -70,6 +76,13 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(code, PAGE_HTML.format(title=title, body=body).encode(), headers=headers or {})
 
     def _route(self):
+        from urllib.parse import urlparse
+
+        with _Handler.lock:
+            _Handler.hits += 1
+            _Handler.path_hits[urlparse(self.path).path] = (
+                _Handler.path_hits.get(urlparse(self.path).path, 0) + 1
+            )
         self._track()
         try:
             path = self.path.split("?", 1)[0]
@@ -144,7 +157,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(500, b"Internal Server Error")
                 return
             if path == "/challenge":
-                self._page(200, title="Just a moment...", body="cf-chl-opt captcha verify you are human")
+                self._page(
+                    200, title="Just a moment...", body="cf-chl-opt captcha verify you are human"
+                )
                 return
             if path == "/denied":
                 self._page(200, title="Denied", body="Access denied unusual traffic")
@@ -176,7 +191,9 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             if path == "/redirect-chain":
                 n = int(q.get("n", "3"))
-                self._send(302, headers={"Location": f"/redirect-chain?n={n - 1}" if n > 1 else "/normal"})
+                self._send(
+                    302, headers={"Location": f"/redirect-chain?n={n - 1}" if n > 1 else "/normal"}
+                )
                 return
             if path == "/redirect-external":
                 target = q.get("to", "https://example.com/")
@@ -192,6 +209,44 @@ class _Handler(BaseHTTPRequestHandler):
                 port = self.server.server_address[1]
                 self._send(302, headers={"Location": f"http://127.0.0.1:{port}/private-page"})
                 return
+            if path == "/redirect-to-private-page":
+                # Subresource bait: a redirect endpoint that, when loaded as
+                # an <img src>, must not reach the private landing page.
+                port = self.server.server_address[1]
+                self._send(302, headers={"Location": f"http://127.0.0.1:{port}/private-page"})
+                return
+            if path == "/public-with-img":
+                # A public page whose subresource redirects into loopback.
+                port = self.server.server_address[1]
+                self._send(
+                    200,
+                    (
+                        b"<!DOCTYPE html><html><head><title>Public Img</title></head>"
+                        b"<body><h1>Public Img</h1>"
+                        b"<p>" + LONG_BODY.encode() + b"</p>"
+                        b'<img src="/redirect-to-private-page">'
+                        b"</body></html>"
+                    ),
+                )
+                return
+            if path == "/redirect-to-secret":
+                # Redirect used as subresource target: must never resolve.
+                port = self.server.server_address[1]
+                self._send(302, headers={"Location": f"http://127.0.0.1:{port}/secret"})
+                return
+            if path == "/public-with-img-secret":
+                # A public page whose subresource redirects to /secret.
+                self._send(
+                    200,
+                    (
+                        b"<!DOCTYPE html><html><head><title>Public Img2</title></head>"
+                        b"<body><h1>Public Img2</h1>"
+                        b"<p>" + LONG_BODY.encode() + b"</p>"
+                        b'<img src="/redirect-to-secret">'
+                        b"</body></html>"
+                    ),
+                )
+                return
 
             # --- SSRF bait endpoints (they must never be reachable from a
             #     properly-guarded client) ---
@@ -202,6 +257,12 @@ class _Handler(BaseHTTPRequestHandler):
                 # Normal HTML page (crawl4ai-extractable) that only exists on
                 # loopback: the SSRF probe target for browser-strategy tests.
                 self._page(title="Private Page", body="PRIVATE DATA LEAKED " + LONG_BODY)
+                return
+            if path == "/secret":
+                # Loopback-only page used as subresource-redirect landing.
+                # Its hit counter proves whether the private endpoint was
+                # ever reached during a browser session.
+                self._page(title="Secret", body="TOP SECRET DATA " + LONG_BODY)
                 return
             if path == "/metadata":
                 self._send(200, b"role: arn:aws:iam::123456789012:role/fake")
@@ -260,7 +321,9 @@ class _Handler(BaseHTTPRequestHandler):
 
             # --- bench inventory ---
             if path == "/bench-list":
-                self._send(200, json.dumps(self.server.bench_urls).encode(), ctype="application/json")
+                self._send(
+                    200, json.dumps(self.server.bench_urls).encode(), ctype="application/json"
+                )
                 return
 
             self._send(404, b"Not Found")
@@ -282,9 +345,23 @@ class TestServer:
         self._thread = None
         # URL inventory for the ladder: success, failure, auth, redirect, etc.
         self.bench_urls = [
-            "/normal", "/long?n=2", "/title-only", "/redirect", "/gzip",
-            "/login", "/403", "/429", "/500", "/thin", "/challenge", "/denied",
-            "/slow?sec=0.05", "/empty", "/malformed", "/json", "/binary",
+            "/normal",
+            "/long?n=2",
+            "/title-only",
+            "/redirect",
+            "/gzip",
+            "/login",
+            "/403",
+            "/429",
+            "/500",
+            "/thin",
+            "/challenge",
+            "/denied",
+            "/slow?sec=0.05",
+            "/empty",
+            "/malformed",
+            "/json",
+            "/binary",
         ]
 
     def start(self):
@@ -312,6 +389,7 @@ class TestServer:
             _Handler.hits = 0
             _Handler.max_active = 0
             _Handler.active = 0
+            _Handler.path_hits = {}
 
     @property
     def max_active(self):
@@ -322,6 +400,11 @@ class TestServer:
     def hits(self):
         with _Handler.lock:
             return _Handler.hits
+
+    def hits_for(self, path):
+        """How many times a specific path received a request (0 = never)."""
+        with _Handler.lock:
+            return _Handler.path_hits.get(path, 0)
 
 
 if __name__ == "__main__":

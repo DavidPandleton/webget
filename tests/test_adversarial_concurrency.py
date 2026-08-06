@@ -1,5 +1,6 @@
 """Adversarial concurrency tests: bounded parallelism, duplicate URLs,
 shared-state races in scrape_many."""
+
 import asyncio
 
 import webget_cli as webget

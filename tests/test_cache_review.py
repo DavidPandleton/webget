@@ -1,4 +1,5 @@
 """Phase 11 cache atomicity + durability review tests."""
+
 import json
 import os
 import threading
@@ -38,8 +39,12 @@ class TestAtomicDurability:
         def writer():
             for i in range(30):
                 webget.cache_put(
-                    url, None, None, 1000,
-                    {"status": "success", "payload": "x" * 10000, "i": i}, None,
+                    url,
+                    None,
+                    None,
+                    1000,
+                    {"status": "success", "payload": "x" * 10000, "i": i},
+                    None,
                 )
             stop.set()
 
@@ -54,7 +59,10 @@ class TestAtomicDurability:
 
         t1 = threading.Thread(target=writer)
         t2 = threading.Thread(target=reader)
-        t1.start(); t2.start(); t1.join(); t2.join()
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
         assert errors == []
 
     def test_corrupt_existing_cache_returns_none(self, isolated_env):

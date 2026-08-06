@@ -1,5 +1,6 @@
 """Adversarial auth + cookie isolation tests: profiles, storage state,
 logout domain scoping, session reuse, corrupted state."""
+
 import asyncio
 import json
 import os
@@ -18,7 +19,14 @@ def _one(res):
 
 
 def _cookie(name, domain, expires=-1):
-    return {"name": name, "value": "v", "domain": domain, "path": "/", "secure": False, "expires": expires}
+    return {
+        "name": name,
+        "value": "v",
+        "domain": domain,
+        "path": "/",
+        "secure": False,
+        "expires": expires,
+    }
 
 
 class TestProfileSafety:

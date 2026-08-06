@@ -1,4 +1,5 @@
 """Phase 11 auth/profile + SSRF interaction review."""
+
 import asyncio
 import json
 import os
@@ -13,7 +14,14 @@ async def _fetch(url, **kw):
 
 
 def _cookie(name, domain, expires=-1):
-    return {"name": name, "value": "v", "domain": domain, "path": "/", "secure": False, "expires": expires}
+    return {
+        "name": name,
+        "value": "v",
+        "domain": domain,
+        "path": "/",
+        "secure": False,
+        "expires": expires,
+    }
 
 
 def _seed_profile(name, cookies, isolated_env):
@@ -93,13 +101,9 @@ class TestProfileValidation:
 
 class TestAuthStateWithProfile:
     def test_success_with_profile_authenticated_true(self):
-        state, authed = webget._auth_state(
-            {"markdown": "x" * 200, "status_code": 200}, "campus"
-        )
+        state, authed = webget._auth_state({"markdown": "x" * 200, "status_code": 200}, "campus")
         assert state == "success" and authed is True
 
     def test_success_anonymous_authenticated_none(self):
-        state, authed = webget._auth_state(
-            {"markdown": "x" * 200, "status_code": 200}, None
-        )
+        state, authed = webget._auth_state({"markdown": "x" * 200, "status_code": 200}, None)
         assert state == "success" and authed is None

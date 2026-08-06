@@ -1,4 +1,5 @@
 """Adversarial HTTP tests: URL handling, status codes, redirects, bodies."""
+
 import asyncio
 
 import pytest
@@ -52,7 +53,9 @@ class TestConnectionFailures:
         assert "method" in out  # any method is fine; must not crash
 
     def test_dns_failure(self):
-        res = asyncio.run(_fetch("http://nonexistent-host-webget-audit.invalid/", per_url_timeout=8))
+        res = asyncio.run(
+            _fetch("http://nonexistent-host-webget-audit.invalid/", per_url_timeout=8)
+        )
         assert _one(res)["status"] == "error"
 
     def test_timeout(self, fresh_cache):
@@ -87,7 +90,9 @@ class TestStatusCodes:
 
 
 class TestRedirects:
-    @pytest.mark.parametrize("path", ["/redirect", "/redirect-301", "/redirect-307", "/redirect-308"])
+    @pytest.mark.parametrize(
+        "path", ["/redirect", "/redirect-301", "/redirect-307", "/redirect-308"]
+    )
     def test_redirects_followed(self, fresh_cache, path):
         server = fresh_cache
         res = asyncio.run(_fetch(server.url(path)))

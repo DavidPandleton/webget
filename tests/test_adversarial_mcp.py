@@ -1,5 +1,6 @@
 """Adversarial MCP tests: malformed args, invalid URLs, repeated/concurrent
 calls, tool failure isolation, SSRF through the MCP surface."""
+
 import asyncio
 import json
 import sys
@@ -138,11 +139,14 @@ class TestInputCaps:
 class TestToolFailureIsolation:
     def test_bogus_then_good_same_session(self):
         """A failed call must not poison subsequent calls in the session."""
+
         async def run():
             params = StdioServerParameters(command=sys.executable, args=[str(MCP)])
             async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
                 await session.initialize()
-                await session.call_tool("fetch", {"url": "https://example.com", "strategy": "bogus"})
+                await session.call_tool(
+                    "fetch", {"url": "https://example.com", "strategy": "bogus"}
+                )
                 res = await session.call_tool(
                     "fetch", {"url": "https://example.com", "strategy": "http", "no_cache": True}
                 )
@@ -169,6 +173,7 @@ class TestSSRFViaMCP:
 
     def test_search_output_shape(self):
         """search must return list of dicts with title/url/snippet."""
+
         async def run():
             params = StdioServerParameters(command=sys.executable, args=[str(MCP)])
             async with stdio_client(params) as (read, write), ClientSession(read, write) as session:

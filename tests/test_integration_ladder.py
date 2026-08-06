@@ -11,6 +11,7 @@ Covers:
 
 All tests target the LOCAL server (deterministic), never external sites.
 """
+
 import asyncio
 import os
 
@@ -155,7 +156,16 @@ class TestBatchIntegration:
         # every entry has the full contract
         for u in urls:
             r = res[u]
-            assert {"title", "markdown", "status", "method", "cached", "attempts", "error", "auth"} <= set(r)
+            assert {
+                "title",
+                "markdown",
+                "status",
+                "method",
+                "cached",
+                "attempts",
+                "error",
+                "auth",
+            } <= set(r)
 
     def test_redirect_chain_integration(self, fresh_cache):
         server = fresh_cache
@@ -192,9 +202,9 @@ class TestCLIContract:
     def test_json_output_contract(self, fresh_cache):
         """The CLI --json shape matches scrape_many's dict-of-URLs contract."""
         server = fresh_cache
-        res = asyncio.run(webget.scrape_many(
-            [server.url("/normal")], max_chars=2000, no_cache=True
-        ))
+        res = asyncio.run(
+            webget.scrape_many([server.url("/normal")], max_chars=2000, no_cache=True)
+        )
         url = server.url("/normal")
         assert url in res
         assert res[url]["status"] == "success"
@@ -202,8 +212,8 @@ class TestCLIContract:
     def test_mcp_fetch_shape_matches(self, fresh_cache):
         """MCP fetch returns the per-URL dict (not the dict-of-URLs)."""
         server = fresh_cache
-        res = asyncio.run(webget.scrape_many(
-            [server.url("/normal")], max_chars=2000, no_cache=True
-        ))
+        res = asyncio.run(
+            webget.scrape_many([server.url("/normal")], max_chars=2000, no_cache=True)
+        )
         per_url = res[server.url("/normal")]
         assert "markdown" in per_url and "status" in per_url

@@ -317,3 +317,82 @@ PACKAGING REVIEW: PASS (build + clean install + smoke from artifact)
 READY TO MERGE: YES (branch audit/deep-audit, pending user approval)
 READY TO TAG: NO (version decision pending, no bump without approval)
 READY TO PUBLISH: NO (requires explicit approval)
+
+---
+
+# Phase 11b — Browser subresource SSRF + Firecrawl review (2026-08-06, third pass)
+
+## 1. Browser subresource redirect SSRF (found, fixed)
+
+**Root cause:** the Phase 11 route guard only hop-checked NAVIGATION
+requests; subresources (`<img>`, `<script>`, `<link>`, fetch/XHR) were
+checked on their initial URL then passed through with
+`route.continue_()`. Because Playwright route handlers fire only for the
+FIRST request of a redirect chain (verified experimentally), a subresource
+whose 302 landed on 127.0.0.1 was followed inside Chromium with no policy
+check. Reproduced: public page with `<img src=/redirect-to-private-page>`
+leaked private content through the browser path.
+
+**Implementation:** unified guard in `_guard_browser_routes()` — EVERY
+request (navigation AND subresource) is now fetched manually hop-by-hop
+via `route.fetch(url, max_redirects=0)` with the SSRF policy checked at
+every hop BEFORE the hop is fetched, then the vetted response is
+fulfilled. 301/302/303 upgrade to GET per HTTP spec; 307/308 preserve
+method+body. Unsupported fetches (e.g. websocket) fall back to
+`route.continue_()` after the initial-URL check.
+
+**Proof (server-side counter):** TestServer now counts requests per path
+(`hits_for(path)`). Tests assert `hits_for("/private-page") == 0` and
+`hits_for("/secret") == 0` — the private endpoints NEVER received a
+request, not merely that their response was discarded.
+
+Results:
+- top-level navigation redirect into private: BLOCKED (error, 0 hits)
+- subresource redirect into private: BLOCKED (0 hits on landing)
+- public->public subresource redirect: still works (title resolved)
+- direct private URL: blocked before browser (0 hits)
+- normal page assets / JS: still render (guard fulfills the real response)
+
+Mutation-verified:
+- subresource bypass mutation (non-navigation continue_() early) -> 3 tests FAIL
+- hop-check removed mutation -> 4 tests FAIL
+
+## 2. Firecrawl SSRF limitation (reviewed, documented, NOT mitigated)
+
+Verified against docs.firecrawl.dev (2026-08): the Firecrawl /v2/scrape
+API has NO parameter to disable redirects, validate redirect
+destinations, receive the redirect chain, or enforce allowed hosts/IPs.
+`threatProtection` (whitelist/blacklist/blockedTlds) exists but is
+ENTERPRISE-only and does not guarantee per-hop validation.
+
+webget guarantees:
+- private/internal URLs are never SENT to Firecrawl (pre-check before ladder)
+- Firecrawl is strictly opt-in (key + explicit strategy)
+
+webget cannot control: any redirect Firecrawl follows after the initial
+URL. This is a REMOTE-provider limitation, distinct from local SSRF
+protection. Documented in fetch_firecrawl docstring; GitHub issue #10
+opened with severity, threat model, mitigations, future options.
+
+## 3. Strategy invariant (tested)
+
+- HTTP blocks private -> Crawl4AI also blocks (browser route guard)
+- Firecrawl never receives a blocked URL (spy test: sent == [])
+- Without a key, firecrawl strategy fails clean (SystemExit, no provider call)
+- Firecrawl remains opt-in; auto ladder only reaches it with a key
+
+## 4. Verification
+
+- pytest: 292 passed, 1 skipped (browser tests run in the [browser] venv: 5/5 pass)
+- ruff check: clean; ruff format --check: clean
+- build: wheel + sdist OK
+- clean install: CLI fetch OK, SSRF block OK, MCP tools OK
+- benchmark: see below
+
+## 5. Benchmark (after unified guard)
+
+- 500 URL http: 50.6-51.1 req/s (baseline ~55.5); run-to-run variance high
+  (45.8-51.1) with system load 0.78; p50 ~172-191ms (baseline ~170ms)
+- 200 URL concurrent isolation run: ~62 req/s (counter overhead negligible)
+- HTTP path does not use the browser guard (guard is browser-only), so the
+  small delta is system noise, not the guard. No meaningful regression.

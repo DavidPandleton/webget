@@ -410,13 +410,14 @@ async def _guard_browser_routes(crawler_ctx):
     private address, even through redirects or subresources.
 
     Crawl4AI does not expose a per-hop URL hook, and Playwright route
-    handlers only fire for the FIRST request of a redirect chain. So:
-    - navigation requests are fetched manually hop-by-hop (max_redirects=0)
-      with the SSRF policy checked at every hop before fulfilling;
-    - subresources are checked on their initial URL and aborted if private
-      (a redirect INSIDE a subresource is a documented residual risk: the
-      browser may still follow it, but subresource content never reaches
-      webget's markdown output).
+    handlers only fire for the FIRST request of a redirect chain (verified
+    experimentally: the second request of a 302 chain never re-enters the
+    route handler, it is followed inside Chromium). So EVERY request -
+    navigation AND subresource - is fetched manually hop-by-hop with
+    max_redirects=0, the SSRF policy is checked at every hop, and only a
+    fully-vetted response is fulfilled to the browser. A redirect inside a
+    subresource therefore cannot escape the policy: the hop target is
+    checked BEFORE it is fetched.
     """
     try:
         bm = crawler_ctx.crawler_strategy.browser_manager
@@ -429,20 +430,12 @@ async def _guard_browser_routes(crawler_ctx):
     async def guard(route, request):
         from urllib.parse import urljoin
 
-        if _is_private_target(request.url):
-            try:
-                await route.abort()
-            except Exception:  # noqa: BLE001, S110 - already aborted
-                pass
-            return
-        if not request.is_navigation_request():
-            try:
-                await route.continue_()
-            except Exception:  # noqa: BLE001, S110 - route already handled
-                pass
-            return
-        # Navigation: follow hops manually, checking each one.
         url = request.url
+        # method/body handling: 301/302/303 upgrades redirects to GET per
+        # HTTP spec; 307/308 preserve method+body.
+        method = request.method
+        body = request.post_data
+
         for _hop in range(21):
             if _is_private_target(url):
                 try:
@@ -451,8 +444,16 @@ async def _guard_browser_routes(crawler_ctx):
                     pass
                 return
             try:
-                resp = await route.fetch(url=url, max_redirects=0)
-            except Exception:  # noqa: BLE001 - let the browser handle errors
+                resp = await route.fetch(
+                    url=url,
+                    method=method,
+                    headers=request.headers,
+                    post_data=body,
+                    max_redirects=0,
+                )
+            except Exception:  # noqa: BLE001 - fetch unsupported (e.g. ws),
+                # let the browser handle it; the initial URL was already
+                # checked and most requests succeed through the manual path.
                 try:
                     await route.continue_()
                 except Exception:  # noqa: BLE001, S110
@@ -463,6 +464,9 @@ async def _guard_browser_routes(crawler_ctx):
                 if not loc:
                     break
                 url = urljoin(url, loc)
+                if resp.status in (301, 302, 303):
+                    method = "GET"
+                    body = None
                 continue
             try:
                 await route.fulfill(response=resp)
@@ -567,7 +571,25 @@ def _auth_state(result, profile):
 
 
 async def fetch_firecrawl(url, max_chars, key, timeout=30):
-    """Firecrawl escape hatch: POST /v1/scrape, formats markdown."""
+    """Firecrawl escape hatch: POST /v1/scrape, formats markdown.
+
+    SECURITY LIMITATION (documented, not mitigated): the actual page fetch
+    is performed by Firecrawl on THEIR infrastructure. The Firecrawl API
+    provides no parameter to disable redirects, validate redirect
+    destinations, receive the redirect chain, or enforce allowed
+    hosts/IPs (verified against docs.firecrawl.dev 2026-08). webget
+    therefore guarantees only:
+      - a private/internal URL is never SENT to Firecrawl (pre-check in
+        scrape_many blocks it before the ladder runs);
+      - Firecrawl is strictly opt-in (requires WEBGET_FIRECRAWL_KEY and an
+        explicit strategy="firecrawl" or auto ladder with key).
+    What webget CANNOT control: any redirect Firecrawl follows after the
+    initial URL, including redirects into addresses that resolve only on
+    Firecrawl's network. This is a REMOTE-provider limitation, distinct
+    from local SSRF protection (HTTP/browser paths fetch from this
+    machine and are fully guarded). Do not rely on Firecrawl as an SSRF
+    boundary; treat URLs sent to it as visible to a third party.
+    """
     import httpx
 
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -803,7 +825,9 @@ async def scrape_many(
                                 res["markdown"] = res.get("markdown", "")[:max_chars]
                                 return url, await record(url, "crawl4ai", res=res)
                             except TimeoutError:
-                                return url, await record(url, "crawl4ai", exc=TimeoutError("timeout"))
+                                return url, await record(
+                                    url, "crawl4ai", exc=TimeoutError("timeout")
+                                )
                             except Exception as e:  # noqa: BLE001 - record reason, ladder continues
                                 return url, await record(url, "crawl4ai", exc=e)
 
@@ -819,7 +843,9 @@ async def scrape_many(
                             # lives on browser_manager instead) - go direct.
                             bm = crawler_ctx.crawler_strategy.browser_manager
                             if bm and bm.default_context is not None:
-                                await bm.default_context.storage_state(path=profile_state_path(profile))
+                                await bm.default_context.storage_state(
+                                    path=profile_state_path(profile)
+                                )
                             else:
                                 _warn(
                                     f"profile '{profile}' used but no browser context "

@@ -9,6 +9,7 @@ Runs against the LOCAL deterministic test server (no external sites):
 Usage:
     python scripts/bench_webget.py [--scale 10,100,500] [--strategy http,auto]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -107,18 +108,22 @@ async def latency_sample(server, urls, strategy, use_cache, max_concurrency=None
 
 
 async def bench(server, scales, strategies, with_cache=False):
-    print(f"{'scale':<6} {'strategy':<10} {'wall':>7} {'req/s':>7} "
-          f"{'success':>9} {'fallback':>8} {'cached':>7} "
-          f"{'p50':>7} {'p95':>7} {'p99':>7}")
+    print(
+        f"{'scale':<6} {'strategy':<10} {'wall':>7} {'req/s':>7} "
+        f"{'success':>9} {'fallback':>8} {'cached':>7} "
+        f"{'p50':>7} {'p95':>7} {'p99':>7}"
+    )
     print("-" * 92)
     for n in scales:
         urls = make_urls(server, n)
         for strat in strategies:
             r = await run_scale(server, urls, strat, use_cache=with_cache)
             lat = await latency_sample(server, urls[:30], strat, use_cache=with_cache)
-            print(f"{r['n']:<6} {strat:<10} {r['wall_s']:>7} {r['req_per_s']:>7} "
-                  f"{r['success']:>9} {r['fallback_count']:>8} {r['cached_count']:>7} "
-                  f"{lat['p50_ms']:>7} {lat['p95_ms']:>7} {lat['p99_ms']:>7}")
+            print(
+                f"{r['n']:<6} {strat:<10} {r['wall_s']:>7} {r['req_per_s']:>7} "
+                f"{r['success']:>9} {r['fallback_count']:>8} {r['cached_count']:>7} "
+                f"{lat['p50_ms']:>7} {lat['p95_ms']:>7} {lat['p99_ms']:>7}"
+            )
             # warm the cache for the cached run
             if with_cache:
                 await webget.scrape_many(urls, max_chars=2000, no_cache=False, strategy=strat)

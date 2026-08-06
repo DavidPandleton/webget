@@ -10,6 +10,7 @@ The guard must block, by default:
 Escape hatch: WEBGET_ALLOW_PRIVATE=1 re-enables fetching private targets
 (legitimate use: scraping an internal/intranet site on purpose).
 """
+
 import asyncio
 
 import pytest

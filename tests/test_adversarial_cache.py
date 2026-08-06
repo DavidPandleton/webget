@@ -1,4 +1,5 @@
 """Adversarial cache tests: isolation keys, corruption, concurrency, atomicity."""
+
 import json
 import os
 import threading
@@ -30,8 +31,14 @@ class TestCacheKeys:
         assert a != b
 
     def test_cookie_order_independent(self):
-        c1 = [{"name": "a", "value": "1", "domain": "x.com"}, {"name": "b", "value": "2", "domain": "x.com"}]
-        c2 = [{"name": "b", "value": "2", "domain": "x.com"}, {"name": "a", "value": "1", "domain": "x.com"}]
+        c1 = [
+            {"name": "a", "value": "1", "domain": "x.com"},
+            {"name": "b", "value": "2", "domain": "x.com"},
+        ]
+        c2 = [
+            {"name": "b", "value": "2", "domain": "x.com"},
+            {"name": "a", "value": "1", "domain": "x.com"},
+        ]
         assert webget._cache_path("https://x.com", c1, None, 1000, None) == webget._cache_path(
             "https://x.com", c2, None, 1000, None
         )
@@ -113,7 +120,9 @@ class TestCacheConcurrency:
 class TestCacheBehavior:
     def test_hit_returns_normalized(self, isolated_env):
         url = "https://cache.test/a"
-        webget.cache_put(url, None, None, 1000, {"status": "success", "markdown": "hello world"}, None)
+        webget.cache_put(
+            url, None, None, 1000, {"status": "success", "markdown": "hello world"}, None
+        )
         hit = webget.cache_get(url, None, None, 1000, 3600)
         assert hit is not None and hit["status"] == "success"
 
