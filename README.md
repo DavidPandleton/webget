@@ -52,7 +52,10 @@ pip install webget-cli
 pip install "webget-cli[browser]"
 
 # uv tool - isolated executable on your PATH
-uv tool install webget-cli --with "webget-cli[browser]"
+# (single spec with extras: do NOT use `--with "webget-cli[browser]"`,
+#  uv re-resolves the same package there and can clobber the main install
+#  with a stale version)
+uv tool install "webget-cli[browser,mcp]"
 ```
 
 After install, `webget` is available as a command:
@@ -186,6 +189,8 @@ without API keys:
 
 ```bash
 pip install "webget-cli[mcp]"
+# or as a uv tool with the MCP server + browser fallback:
+uv tool install "webget-cli[browser,mcp]"
 ```
 
 Register as a local MCP server in opencode:
