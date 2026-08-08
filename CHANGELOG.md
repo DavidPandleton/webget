@@ -5,6 +5,38 @@ All notable changes to webget are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-08
+
+### Security
+- SSRF guard hardened (3 layers): blocks literal private IPs (IPv4/IPv6/
+  IPv4-mapped, alternate numerics), hostnames resolving to private targets,
+  and every redirect hop on the HTTP path; the browser path now guards
+  navigation AND subresource requests hop-by-hop (route.fetch + per-hop
+  policy check), so a public page pointing at a private redirect can no
+  longer leak local services (server-side hit-counter verified).
+- Expired cookies are no longer sent on the HTTP fast path (previously an
+  expired profile session still sent its cookie).
+- Documented accepted residual risks: DNS rebinding/TOCTOU in hostname
+  resolution (issue #9) and Firecrawl's provider-side redirect chain
+  (issue #10), in docs/deep-audit-2026-08-06.md.
+
+### Fixed
+- Concurrent cache writers can no longer corrupt the cache: each writer now
+  uses its own unique tmp file (mkstemp) before the atomic rename, instead
+  of a shared `<key>.tmp` (observed real corruption as `Extra data`
+  JSONDecodeError; deterministic regression test added).
+- Response size cap (25MB) is now enforced inside the streaming loop;
+  `client.get()` previously buffered the entire body before the cap could
+  apply.
+- MCP server: input caps (n<=50, max_chars<=1M, timeout<=120), strategy
+  whitelist, and structured error payloads; an invalid strategy or
+  firecrawl-without-key no longer raises SystemExit and kills the whole
+  server process.
+- Bounded concurrency across the ladder (semaphore, default 10,
+  `max_concurrency=` override).
+- Cache keys are order-independent (cookies/headers sorted before hashing);
+  identical URLs fetched once.
+
 ## [0.7.0] - 2026-08-06
 
 ### Added
@@ -137,5 +169,6 @@ All notable changes to webget are documented here. Format follows
   scrape (`su`), batch stdin, `-c`/`-H`/`-n`/`-t` options, JSON output.
 - Zero API keys, unlimited usage.
 
+[0.7.1]: https://github.com/DavidPandleton/webget/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/DavidPandleton/webget/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/DavidPandleton/webget/compare/v0.5.0...v0.6.0
