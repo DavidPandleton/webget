@@ -126,7 +126,7 @@ class TestResponseBodies:
     def test_malformed_html(self, fresh_cache):
         server = fresh_cache
         res = asyncio.run(_fetch(server.url("/malformed")))
-        # html2text usually still extracts something; at minimum no crash
+        # markdownify usually still extracts something; at minimum no crash
         assert "status" in _one(res)
 
     def test_binary_response(self, fresh_cache):

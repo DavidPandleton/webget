@@ -5,6 +5,12 @@ All notable changes to webget are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-08-08
+
+### Changed
+- HTML-to-Markdown fallback from html2text to markdownify.
+- Project licensing updated to Apache-2.0.
+
 ## [0.7.2] - 2026-08-08
 
 ### Fixed
@@ -181,6 +187,7 @@ All notable changes to webget are documented here. Format follows
   scrape (`su`), batch stdin, `-c`/`-H`/`-n`/`-t` options, JSON output.
 - Zero API keys, unlimited usage.
 
+[0.7.3]: https://github.com/DavidPandleton/webget/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/DavidPandleton/webget/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/DavidPandleton/webget/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/DavidPandleton/webget/compare/v0.6.0...v0.7.0

@@ -9,10 +9,10 @@ through a strategy ladder (HTTP fast path → Crawl4AI browser → optional
 Firecrawl), and reports *provenance* - where the content came from and whether
 the session that fetched it can be trusted.
 
-[![CI](https://img.shields.io/github/actions/workflow/status/DavidPandleton/webget/ci.yml?label=CI&logo=github)](https://github.com/DavidPandleton/webget/actions)
-[![PyPI](https://img.shields.io/pypi/v/webget-cli.svg)](https://pypi.org/project/webget-cli/)
+[![CI](https://github.com/DavidPandleton/webget/actions/workflows/ci.yml/badge.svg)](https://github.com/DavidPandleton/webget/actions)
+[![PyPI](https://img.shields.io/pypi/v/webget-cli.svg?cacheSeconds=3600)](https://pypi.org/project/webget-cli/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg?cacheSeconds=3600)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/DavidPandleton/webget?style=social)](https://github.com/DavidPandleton/webget)
 
 </div>
@@ -25,7 +25,7 @@ Most scraping tools assume one engine. webget assumes the web is messy:
 
 ```text
 FETCH_AUTO
-├── http       → fast path (httpx + trafilatura/html2text), no browser
+├── http       → fast path (httpx + trafilatura/markdownify), no browser
 ├── crawl4ai   → Playwright browser, JS rendering, persistent auth sessions
 └── firecrawl  → optional cloud fallback (needs WEBGET_FIRECRAWL_KEY)
 ```
@@ -233,4 +233,8 @@ Found a bug or have an idea? [Open an issue](https://github.com/DavidPandleton/w
 
 ## License
 
-[MIT](LICENSE)
+[Apache-2.0](LICENSE)
+
+Note: dependency licenses are separate (e.g. certifi MPL-2.0, tqdm
+MPL-2.0 AND MIT, scipy's bundled GCC-runtime GPL-with-exception via the
+browser extra); each dependency keeps its own license/notice.

@@ -229,7 +229,7 @@ def parse_opts(args):
 
 
 def _extract_markdown(html):
-    """Try trafilatura (clean article text) then html2text (full markdown)."""
+    """Try trafilatura (clean article text) then markdownify (full markdown)."""
     try:
         import trafilatura
 
@@ -239,13 +239,13 @@ def _extract_markdown(html):
     except Exception:  # noqa: BLE001, S110 - extraction libs vary; fall through
         pass
     try:
-        import html2text
+        from markdownify import markdownify as md
 
-        h = html2text.HTML2Text()
-        h.ignore_links = False
-        h.body_width = 0
-        md = h.handle(html).strip()
-        return md if len(md) > 50 else ""
+        # bullets="*" and heading_style="ATX" match the previous html2text
+        # output style (verified differential 2026-08-08) so the fallback
+        # stays close to 0.7.2 (semantic parity).
+        converted = md(html, bullets="*", heading_style="ATX").strip()
+        return converted if len(converted) > 50 else ""
     except Exception:  # noqa: BLE001 - best-effort extraction, empty is fine
         return ""
 

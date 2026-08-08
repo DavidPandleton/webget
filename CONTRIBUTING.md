@@ -19,7 +19,7 @@ pytest
 ruff check webget_cli.py tests
 ```
 
-Runtime deps (crawl4ai, ddgs, httpx, trafilatura, html2text) are only needed
+Runtime deps (crawl4ai, ddgs, httpx, trafilatura, markdownify) are only needed
 when you actually run fetches. The test suite covers pure logic and does not
 require them.
 
@@ -43,6 +43,13 @@ closed. The tool's job is to report honestly what it hit
 - If a PR touches auth handling, add a test showing secrets do not leak into
   output.
 - Sensitive issues? Email tarigansdavid@gmail.com or open a private report.
+
+## Licensing
+
+webget is licensed under Apache-2.0. By submitting a pull request you agree
+that your contribution is made available under Apache-2.0, like the rest of
+the project. You keep copyright over your own contribution (no assignment);
+the project merely receives a license to use it under Apache-2.0.
 
 ## Before opening a PR
 
