@@ -42,6 +42,7 @@ import os
 import re
 import socket
 import sys
+import tempfile
 import time
 
 
@@ -118,13 +119,21 @@ def cache_get(url, cookies, headers, max_chars, ttl, fresh=False, profile=None):
 def cache_put(url, cookies, headers, max_chars, data, profile=None):
     os.makedirs(CACHE_DIR, exist_ok=True)
     p = _cache_path(url, cookies, headers, max_chars, profile)
-    tmp = p + ".tmp"
+    tmp = None
     try:
-        # Atomic write: write to tmp then rename so a crash or a concurrent
-        # writer can never leave a truncated/partial JSON at the real path.
-        with open(tmp, "w") as f:
+        # Atomic write: each writer gets its OWN unique tmp file (mkstemp),
+        # then an atomic rename. A shared "<path>.tmp" would let concurrent
+        # writers interleave bytes in the same file, so the rename would
+        # publish a corrupt document. mkstemp guarantees uniqueness per
+        # writer and lives in the same directory (same filesystem, so
+        # os.replace stays atomic).
+        fd, tmp = tempfile.mkstemp(
+            dir=os.path.dirname(p), prefix=os.path.basename(p) + ".", suffix=".tmp"
+        )
+        with os.fdopen(fd, "w") as f:
             json.dump({**data, "fetched_at": time.time()}, f)
         os.replace(tmp, p)
+        tmp = None  # consumed by the rename
         # simple eviction: keep newest 400 of 500
         try:
             files = [
@@ -139,11 +148,11 @@ def cache_put(url, cookies, headers, max_chars, data, profile=None):
     except OSError:
         pass  # cache is best-effort
     finally:
-        try:
-            if os.path.exists(tmp):
+        if tmp is not None:
+            try:
                 os.remove(tmp)
-        except OSError:
-            pass
+            except OSError:
+                pass
 
 
 def parse_opts(args):
@@ -930,11 +939,19 @@ def _read_json(path):
 
 
 def _write_json(path, data):
-    """Sync helper for to_thread: atomic JSON write (tmp + rename)."""
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f)
-    os.replace(tmp, path)
+    """Sync helper for to_thread: atomic JSON write (unique tmp + rename)."""
+    fd, tmp = tempfile.mkstemp(
+        dir=os.path.dirname(path), prefix=os.path.basename(path) + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 # ---------- Phase 4: session management UX ----------

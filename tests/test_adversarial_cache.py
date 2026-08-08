@@ -91,6 +91,47 @@ class TestCacheConcurrency:
             data = json.load(f)  # must parse
         assert data["status"] == "success"
 
+    def test_concurrent_writers_use_unique_tmp(self, isolated_env):
+        """Deterministic regression (real bug caught 2026-08-08): concurrent
+        writers must NEVER share a tmp path. A shared '<path>.tmp' lets
+        threads interleave bytes in one file, so the atomic rename publishes
+        a corrupt document (observed as 'Extra data' JSONDecodeError). This
+        spies on os.replace instead of hoping the race window opens."""
+        url = "https://unique-tmp.test/page"
+        real_replace = os.replace
+        seen = []
+        lock = threading.Lock()
+
+        def spy(src, dst):
+            with lock:
+                seen.append(src)
+            return real_replace(src, dst)
+
+        os.replace = spy
+        try:
+            threads = [
+                threading.Thread(
+                    target=webget.cache_put,
+                    args=(url, None, None, 1000, {"status": "success", "i": i}, None),
+                )
+                for i in range(20)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        finally:
+            os.replace = real_replace
+
+        final = webget._cache_path(url, None, None, 1000, None)
+        assert len(seen) == 20, f"expected 20 renames, got {len(seen)}"
+        assert len(set(seen)) == 20, "concurrent writers shared a tmp path"
+        for src in seen:
+            assert src.endswith(".tmp")
+            assert src != final
+        leftover = [f for f in os.listdir(isolated_env["cache"]) if f.endswith(".tmp")]
+        assert leftover == [], f"leftover tmp files: {leftover}"
+
     def test_no_partial_file_on_write(self, isolated_env):
         """Atomic write: cache_put must write via tmp + os.replace, so a
         crash mid-write can never leave a truncated file at the real path."""
