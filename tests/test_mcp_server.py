@@ -29,7 +29,8 @@ def test_tools_listed():
             tools = await session.list_tools()
             return [t.name for t in tools.tools]
 
-    assert _run(run()) == ["search", "fetch", "search_fetch", "list_profiles"]
+    # order is not a contract; membership is
+    assert sorted(_run(run())) == sorted(["search", "fetch", "search_fetch", "list_profiles"])
 
 
 def test_invalid_strategy_returns_error_not_crash():
