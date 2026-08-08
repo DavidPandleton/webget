@@ -19,10 +19,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install dev deps (unit tests are pure logic, no runtime deps needed)
+      - name: Install package + dev tools
+        # Core runtime deps (ddgs/httpx/trafilatura/html2text) come from
+        # `pip install -e .`; adversarial/integration tests exercise real
+        # fetch paths, so they need httpx at collection+run time.
         run: |
           python -m pip install --upgrade pip
-          pip install pytest ruff
+          pip install -e . pytest ruff
       - name: Lint
         run: ruff check webget_cli.py webget_mcp.py tests
       - name: Test
