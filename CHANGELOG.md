@@ -5,6 +5,18 @@ All notable changes to webget are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-08
+
+### Fixed
+- Browser route-guard failure when handling binary request bodies (e.g.
+  gzip-compressed POST payloads), which could cause requests to bypass the
+  intended private-address protection. Request bodies are now replayed as
+  raw bytes and the SSRF policy stays active for every request. Regression
+  tests added at the unit level (binary-body stub) and browser-integration
+  level (byte-exact public replay, zero-hit private target).
+- `.hermes/plans/` (agent working files) is now gitignored and the tracked
+  plan file was untracked; no runtime impact.
+
 ## [0.7.1] - 2026-08-08
 
 ### Security
@@ -169,6 +181,7 @@ All notable changes to webget are documented here. Format follows
   scrape (`su`), batch stdin, `-c`/`-H`/`-n`/`-t` options, JSON output.
 - Zero API keys, unlimited usage.
 
+[0.7.2]: https://github.com/DavidPandleton/webget/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/DavidPandleton/webget/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/DavidPandleton/webget/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/DavidPandleton/webget/compare/v0.5.0...v0.6.0
