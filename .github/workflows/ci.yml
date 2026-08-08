@@ -30,9 +30,9 @@ jobs:
         run: ruff check webget_cli.py webget_mcp.py tests
       - name: Test
         # MCP tests need the mcp SDK: run in the dedicated mcp-test job.
-        # test_adversarial_mcp.py / test_mcp_leak_review.py also import mcp
-        # at collection time, so they are scoped out here too.
-        run: pytest --ignore=tests/test_mcp_server.py --ignore=tests/test_mcp_smoke.py --ignore=tests/test_adversarial_mcp.py --ignore=tests/test_mcp_leak_review.py
+        # test_adversarial_mcp.py / test_mcp_leak_review.py / test_mcp_profile.py
+        # also import mcp at collection time, so they are scoped out here too.
+        run: pytest --ignore=tests/test_mcp_server.py --ignore=tests/test_mcp_smoke.py --ignore=tests/test_adversarial_mcp.py --ignore=tests/test_mcp_leak_review.py --ignore=tests/test_mcp_profile.py
 
   mcp-test:
     runs-on: ubuntu-latest
@@ -48,7 +48,7 @@ jobs:
           pip install -e ".[mcp]"
           pip install pytest
       - name: MCP server tests
-        run: pytest tests/test_mcp_server.py tests/test_mcp_smoke.py tests/test_adversarial_mcp.py tests/test_mcp_leak_review.py -q
+        run: pytest tests/test_mcp_server.py tests/test_mcp_smoke.py tests/test_adversarial_mcp.py tests/test_mcp_leak_review.py tests/test_mcp_profile.py -q
 
   smoke:
     runs-on: ubuntu-latest
