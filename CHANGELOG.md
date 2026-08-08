@@ -5,6 +5,16 @@ All notable changes to webget are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-08
+
+### Added
+- MCP server: `list_profiles` tool (non-sensitive session metadata) and a
+  `profile` parameter on `fetch` / `search_fetch` for authenticated
+  scraping with locally stored sessions (`webget login`). Cookie values
+  are never exposed; invalid or unknown profile names return clean errors
+  instead of a silent anonymous fallback.
+- `WEBGET_PROFILE_DIR` env override for the profile root (tests/ops).
+
 ## [0.7.3] - 2026-08-08
 
 ### Changed
@@ -187,6 +197,7 @@ All notable changes to webget are documented here. Format follows
   scrape (`su`), batch stdin, `-c`/`-H`/`-n`/`-t` options, JSON output.
 - Zero API keys, unlimited usage.
 
+[0.8.0]: https://github.com/DavidPandleton/webget/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/DavidPandleton/webget/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/DavidPandleton/webget/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/DavidPandleton/webget/compare/v0.7.0...v0.7.1

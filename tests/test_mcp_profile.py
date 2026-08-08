@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 MCP = ROOT / "webget_mcp.py"
 sys.path.insert(0, str(ROOT))
 
-from tests.http_server import TestServer  # noqa: E402
+from tests.http_server import TestServer
 
 
 def _spawn(profile_root):
@@ -63,7 +63,10 @@ def test_mcp_fetch_with_profile_uses_session(tmp_path):
         url = server.url("/cookie-gated")
 
         async def run():
-            async with stdio_client(_spawn(root)) as (read, write), ClientSession(read, write) as session:
+            async with (
+                stdio_client(_spawn(root)) as (read, write),
+                ClientSession(read, write) as session,
+            ):
                 await session.initialize()
                 ok = await session.call_tool(
                     "fetch", {"url": url, "strategy": "http", "no_cache": True, "profile": "testp"}
@@ -81,7 +84,7 @@ def test_mcp_fetch_with_profile_uses_session(tmp_path):
         assert "you are authenticated" in ok_text, ok_text
         assert '"authenticated":true' in ok_text, ok_text  # session was used
         # anonymous fetch must NOT succeed on the gated page
-        assert not ok_text == anon_text
+        assert ok_text != anon_text
         assert '"status":"success"' not in anon_text, f"anonymous fetch leaked: {anon_text}"
     finally:
         server.stop()

@@ -106,7 +106,9 @@ class TestListProfiles:
         d = tmp_path / "profiles" / "sion"
         (d / "Default").mkdir(parents=True)
         state = {
-            "cookies": [{"name": "secret", "value": "SUPERSECRET", "domain": ".x.com", "expires": -1}]
+            "cookies": [
+                {"name": "secret", "value": "SUPERSECRET", "domain": ".x.com", "expires": -1}
+            ]
         }
         (d / "storage_state.json").write_text(json.dumps(state))
         meta = webget.list_profiles()

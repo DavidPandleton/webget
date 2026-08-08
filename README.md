@@ -210,9 +210,31 @@ Register as a local MCP server in opencode:
 Then prompt with `use webget` for search and scrape tasks. Run the server
 standalone with `webget-mcp` (stdio transport) or `python webget_mcp.py`.
 
-> **Limitation:** MCP tools do not expose `--profile`/`--cookies`, so
-> authenticated pages are out of scope for the MCP server. Use the CLI
-> (`webget login`, `webget u --profile ...`) for session-based fetching.
+### Authenticated sessions (profiles)
+
+MCP tools can use locally stored login sessions. Create one first with the
+CLI:
+
+```bash
+webget login https://portal.example.com --profile portal
+```
+
+Then the agent can discover sessions and fetch authenticated pages:
+
+- `list_profiles` - lists available sessions (name, last used, size,
+  status). Cookie values are never returned.
+- `fetch(..., profile="portal")` / `search_fetch(..., profile="portal")` -
+  scrape using that session.
+
+```text
+agent: "check my portal for new announcements"
+  1. list_profiles            -> portal (authenticated)
+  2. fetch(url, profile="portal")
+```
+
+Invalid profile names and unknown profiles are hard errors (no silent
+anonymous fallback). Sessions are local to the machine running the MCP
+server.
 
 ## Development
 
