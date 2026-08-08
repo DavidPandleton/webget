@@ -23,6 +23,7 @@ Options:
   --ttl N             Cache TTL in seconds (default: 3600)
   --strategy S        Fetch strategy: auto|http|crawl4ai|firecrawl (default auto)
   --no-cache          Don't read or write the disk cache (private fetch)
+  --concurrency N     Max concurrent fetches for batch runs (default: 10)
   --headless          Run login browser without a window (tests/automation)
   --json              Output results as JSON with metadata
                       (status/method/cached/auth)
@@ -169,6 +170,7 @@ def parse_opts(args):
     profile = None
     no_cache = False
     headless = False
+    concurrency = None
     remaining = []
     i = 0
     while i < len(args):
@@ -177,6 +179,9 @@ def parse_opts(args):
             i += 2
         elif args[i] == "--profile" and i + 1 < len(args):
             profile = args[i + 1]
+            i += 2
+        elif args[i] == "--concurrency" and i + 1 < len(args):
+            concurrency = int(args[i + 1])
             i += 2
         elif args[i] == "--no-cache":
             no_cache = True
@@ -225,6 +230,7 @@ def parse_opts(args):
         profile,
         no_cache,
         headless,
+        concurrency,
     )
 
 
@@ -1107,11 +1113,33 @@ def cmd_profiles(json_out):
         )
 
 
-async def _login_flow(site, profile, headless):
+async def _login_flow(
+    site,
+    profile,
+    headless,
+    wait_seconds=120,
+    interactive=True,
+    quiet=False,
+):
+    """Login flow for a profile: open browser, user logs in, session persists.
+
+    interactive=True (CLI): waits for Enter on stdin, exactly like before.
+    interactive=False (MCP): stdin is the JSON-RPC stream — a blocking
+    input() would swallow protocol bytes, so instead we poll the browser
+    context until session cookies appear (the Set-Cookie side effect of
+    the login handshake) or wait_seconds elapses, then persist.
+    quiet=True (MCP): status lines go to stderr; stdout belongs to FastMCP.
+    """
     from playwright.async_api import async_playwright
 
     state_p = profile_state_path(profile)
     os.makedirs(profile_dir(profile), exist_ok=True)
+
+    def _say(msg):
+        if quiet:
+            print(msg, file=sys.stderr)
+        else:
+            print(msg)
 
     async with async_playwright() as p:
         context = await p.chromium.launch_persistent_context(
@@ -1119,23 +1147,46 @@ async def _login_flow(site, profile, headless):
             headless=headless,
         )
         page = context.pages[0] if context.pages else await context.new_page()
-        print(f"Opening {site} in a browser with profile '{profile}'...")
-        print("Log in manually in the browser window.")
-        print("When you are done, come back here and press Enter.")
+        _say(f"Opening {site} in a browser with profile '{profile}'...")
+        if interactive:
+            _say("Log in manually in the browser window.")
+            _say("When you are done, come back here and press Enter.")
         try:
             await page.goto(site, wait_until="domcontentloaded", timeout=60000)
         except Exception as e:  # noqa: BLE001 - navigation issues shouldn't kill login
             _warn(f"could not navigate to {site}: {e}")
-        try:
-            await asyncio.to_thread(input, "Press Enter when done: ")
-        except EOFError:
-            pass  # non-interactive stdin (tests) - proceed immediately
+        if interactive:
+            try:
+                await asyncio.to_thread(input, "Press Enter when done: ")
+            except EOFError:
+                pass  # non-interactive stdin (tests) - proceed immediately
+        else:
+            await _wait_for_session_cookies(context, wait_seconds)
         try:
             await context.storage_state(path=state_p)
-            print(f"Session persisted for profile '{profile}'.")
+            _say(f"Session persisted for profile '{profile}'.")
         except Exception as e:  # noqa: BLE001 - persistence must surface
             _warn(f"failed to persist profile session for '{profile}': {e}")
         await context.close()
+
+
+async def _wait_for_session_cookies(context, wait_seconds):
+    """Poll the live browser context until it holds any cookie.
+
+    Used by non-interactive login (MCP tool): there is no Enter keypress on
+    the JSON-RPC stdin, so instead we watch for the login handshake's
+    Set-Cookie side effect. Returns as soon as cookies appear or after
+    wait_seconds, whichever is first.
+    """
+    deadline = time.monotonic() + max(0, wait_seconds)
+    while time.monotonic() < deadline:
+        try:
+            if await context.cookies():
+                return
+        except Exception:  # noqa: BLE001, S110 - context mid-navigation; keep polling
+            pass
+        await asyncio.sleep(1)
+    _warn(f"no session cookies observed within {wait_seconds}s; persisting anyway")
 
 
 def cmd_login(site, profile, headless):
@@ -1276,7 +1327,12 @@ def main():
         profile,
         no_cache,
         headless,
+        concurrency,
     ) = parse_opts(args)
+
+    if concurrency is not None and concurrency < 1:
+        print("error: --concurrency must be >= 1")
+        sys.exit(2)
 
     if not args:
         print(__doc__)
@@ -1334,6 +1390,7 @@ def main():
                 strategy=strategy,
                 profile=profile,
                 no_cache=no_cache,
+                max_concurrency=concurrency,
             )
         )
         if json_out:
@@ -1377,6 +1434,7 @@ def main():
                 strategy=strategy,
                 profile=profile,
                 no_cache=no_cache,
+                max_concurrency=concurrency,
             )
         )
         if json_out:
