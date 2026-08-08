@@ -23,6 +23,9 @@ dist/
 .cache/
 profiles/
 
+# Agent working files (plan mode, internal only)
+.hermes/plans/
+
 # Editor / OS
 .DS_Store
 *.swp
