@@ -5,6 +5,16 @@ All notable changes to webget are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- MCP server: `login` tool opens a browser session for a profile, navigates
+  to a URL, and persists the session without blocking on stdin (the MCP
+  stdin is the JSON-RPC stream, so the flow polls the browser context until
+  session cookies appear instead of waiting for an Enter keypress). Invalid
+  URLs, profile names, and out-of-range `wait_seconds` are clean errors.
+- CLI: `--concurrency N` flag for batch runs (`webget u -` / `webget su`),
+  plumbing the existing `max_concurrency` parameter of `scrape_many` to the
+  command line (default stays 10).
+
 ## [0.8.0] - 2026-08-08
 
 ### Added

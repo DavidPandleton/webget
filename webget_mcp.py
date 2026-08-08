@@ -88,6 +88,52 @@ def list_profiles() -> list[dict]:
 
 
 @mcp.tool()
+async def login(
+    url: str,
+    profile: str,
+    wait_seconds: int = 120,
+    headless: bool = False,
+) -> dict:
+    """Open a browser session for profile, navigate to url, and persist
+    the login session.
+
+    This is NON-INTERACTIVE: the MCP stdin is the JSON-RPC stream, so there
+    is no Enter keypress. The flow polls the browser context until session
+    cookies appear (the Set-Cookie side effect of the login handshake) or
+    wait_seconds elapses, then persists. Use a headful browser (default) so
+    a human can complete the login in the window. Returns the persisted
+    profile state; cookie values are never returned.
+    """
+    for name, value, lo, hi in (
+        ("wait_seconds", wait_seconds, 5, 600),
+    ):
+        err = _clamp(name, value, lo, hi)
+        if err:
+            return {"status": "error", "error": err}
+    ok, host = wg._valid_site_url(url)
+    if not ok:
+        return {"status": "error", "error": f"invalid site URL: {url!r}"}
+    try:
+        wg.profile_dir(profile)  # raises SystemExit on invalid names
+    except SystemExit as e:
+        return {"status": "error", "error": str(e)}
+    await asyncio.to_thread(
+        lambda: asyncio.run(
+            wg._login_flow(
+                url, profile, headless, wait_seconds=wait_seconds,
+                interactive=False, quiet=True,
+            )
+        )
+    )
+    return {
+        "status": "success",
+        "profile": profile,
+        "host": host,
+        "message": f"session persisted for profile '{profile}' ({host})",
+    }
+
+
+@mcp.tool()
 async def fetch(
     url: str,
     max_chars: int = 10000,
