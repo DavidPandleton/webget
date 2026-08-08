@@ -140,6 +140,29 @@ def test_fetch_nonexistent_profile_returns_error():
     assert "profile 'ghost' not found" in res.content[0].text
 
 
+def test_search_fetch_invalid_profile_returns_error_not_crash():
+    """search_fetch must validate profile the same way and stay alive."""
+
+    async def run():
+        params = StdioServerParameters(command=sys.executable, args=[str(MCP)])
+        async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+            await session.initialize()
+            res = await session.call_tool(
+                "search_fetch",
+                {"query": "test", "n": 1, "profile": "../etc"},
+            )
+            ok = await session.call_tool(
+                "search_fetch",
+                {"query": "example.com", "n": 1},
+            )
+            return res, ok
+
+    res, ok = _run(run())
+    assert not res.isError
+    assert "invalid profile name" in res.content[0].text
+    assert not ok.isError  # server alive after the bad call
+
+
 if __name__ == "__main__":
     import pytest
 

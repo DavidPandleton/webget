@@ -130,11 +130,16 @@ async def search_fetch(
     max_chars: int = 4000,
     timeout: int = 20,
     no_cache: bool = False,
+    profile: str | None = None,
 ) -> list[dict]:
     """Search the web, then scrape the top n results in parallel.
 
     Returns one entry per URL with rank, search snippet, and scrape result
     (status/method/markdown).
+
+    profile: name of a locally stored login session (created with
+    'webget login URL --profile NAME'). Invalid names and unknown
+    profiles are hard errors (never a silent anonymous fallback).
     """
     for name, value, lo, hi in (
         ("n", n, 1, _MAX_SEARCH_N),
@@ -144,6 +149,10 @@ async def search_fetch(
         err = _clamp(name, value, lo, hi)
         if err:
             return [{"error": err}]
+    if profile is not None:
+        err = _validate_profile(profile)
+        if err:
+            return [{"error": err}]
     results = await asyncio.to_thread(wg.search, query, n)
     urls = [r["url"] for r in results]
     scraped = await wg.scrape_many(
@@ -151,6 +160,7 @@ async def search_fetch(
         max_chars=max_chars,
         per_url_timeout=timeout,
         no_cache=no_cache,
+        profile=profile,
     )
     out = []
     for i, r in enumerate(results):
