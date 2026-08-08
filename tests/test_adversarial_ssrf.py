@@ -130,3 +130,41 @@ class TestSSRFGuardLadder:
         out = _one(res)
         assert "attempts" in out
         assert out["method"] in ("http", "crawl4ai", "firecrawl", "")
+
+
+class TestRequestBodyBytes:
+    """Regression (0.7.1 bug): the browser route guard read request.post_data,
+    which decodes UTF-8 and raises UnicodeDecodeError on binary/compressed
+    bodies (gzip POSTs, seen on facebook/linkedin). The guard must read the
+    UNDECODED bytes (post_data_buffer), and body handling must never be part
+    of the SSRF decision."""
+
+    class _BinaryRequest:
+        """Stub of a Playwright request with a gzip/binary body."""
+
+        @property
+        def post_data(self):
+            # The exact 0.7.1 crash: post_data forces UTF-8 decode.
+            raise UnicodeDecodeError("utf-8", b"\x8b", 0, 1, "invalid start byte")
+
+        @property
+        def post_data_buffer(self):
+            return b"\x1f\x8b\x08\x00binary-gzip-body"
+
+    def test_returns_undecoded_bytes(self):
+        assert webget._request_body_bytes(self._BinaryRequest()) == (
+            b"\x1f\x8b\x08\x00binary-gzip-body"
+        )
+
+    def test_never_calls_post_data(self):
+        """If someone reverts to request.post_data, this test must fail."""
+        r = self._BinaryRequest()
+        assert webget._request_body_bytes(r) is not None  # would raise otherwise
+
+    def test_none_on_any_error(self):
+        class _Broken:
+            @property
+            def post_data_buffer(self):
+                raise RuntimeError("transport closed")
+
+        assert webget._request_body_bytes(_Broken()) is None

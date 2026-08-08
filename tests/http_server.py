@@ -20,6 +20,7 @@ Benchmark usage:
 
 from __future__ import annotations
 
+import base64
 import gzip
 import json
 import threading
@@ -48,6 +49,8 @@ class _Handler(BaseHTTPRequestHandler):
     # endpoint never received a request (not merely that its response was
     # discarded after the request happened).
     path_hits: ClassVar[dict[str, int]] = {}
+    # Last received request body per path (binary POST sink regression).
+    last_bodies: ClassVar[dict[str, bytes]] = {}
 
     def log_message(self, *args):  # silence
         pass
@@ -268,6 +271,45 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, b"role: arn:aws:iam::123456789012:role/fake")
                 return
 
+            # --- binary POST bait (browser route guard regression) ---
+            if path == "/binary-post":
+                # Public POST sink: records the exact body bytes it received
+                # and counts hits, so tests can assert the guard replayed a
+                # binary/gzip body without crashing or dropping it.
+                length = int(self.headers.get("Content-Length", "0") or 0)
+                raw = self.rfile.read(length) if length else b""
+                with _Handler.lock:
+                    _Handler.last_bodies["/binary-post"] = raw
+                self._send(200, b"got it")
+                return
+            if path == "/binary-post-private":
+                # Loopback-only bait: if the route guard crashes on a binary
+                # body BEFORE its private check (the 0.7.1 bug), the handler
+                # dies and Playwright continues natively, so this endpoint
+                # receives the request. A hit proves the SSRF bypass.
+                length = int(self.headers.get("Content-Length", "0") or 0)
+                if length:
+                    self.rfile.read(length)
+                self._send(200, b"PRIVATE BINARY LEAKED")
+                return
+            if path == "/binary-post-driver":
+                # Public page whose JS POSTs a gzip-compressed body (non-UTF8
+                # bytes) to the ?to= target: the exact facebook/linkedin case.
+                target = q.get("to", "/binary-post")
+                gz = gzip.compress(b"binary payload " * 50)
+                b64 = base64.b64encode(gz).decode()
+                html = (
+                    "<!DOCTYPE html><html><head><title>Binary POST driver</title></head>"
+                    "<body><h1>Binary POST driver</h1>"
+                    f"<p>{LONG_BODY}</p>"
+                    f'<script>fetch("{target}", {{method:"POST", '
+                    f'headers:{{"Content-Type":"application/octet-stream"}}, '
+                    f'body:Uint8Array.from(atob("{b64}"), c=>c.charCodeAt(0))}});'
+                    "</script></body></html>"
+                )
+                self._send(200, html.encode())
+                return
+
             # --- malformed / empty / binary / compressed ---
             if path == "/empty":
                 self._send(200, b"")
@@ -405,6 +447,11 @@ class TestServer:
         """How many times a specific path received a request (0 = never)."""
         with _Handler.lock:
             return _Handler.path_hits.get(path, 0)
+
+    def last_body(self, path):
+        """Raw request body bytes last received at path (binary POST sink)."""
+        with _Handler.lock:
+            return _Handler.last_bodies.get(path)
 
 
 if __name__ == "__main__":

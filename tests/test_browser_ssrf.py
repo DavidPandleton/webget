@@ -16,6 +16,7 @@ request at all, not merely that its response was discarded.
 """
 
 import asyncio
+import gzip
 import sys
 from pathlib import Path
 
@@ -147,3 +148,58 @@ class TestNavigationRedirectSSRF:
         assert out["status"] == "error"
         # scrape_many's pre-check blocks before the browser ever runs.
         assert server.hits_for(PRIVATE_PAGE) == 0
+
+
+class TestBinaryPostGuard:
+    """Regression (0.7.1 bug): the route guard read request.post_data which
+    decodes UTF-8 and raises UnicodeDecodeError on gzip/binary POST bodies
+    (seen on facebook/linkedin). The handler died BEFORE the private-address
+    check, Playwright continued the request natively, and a binary POST to a
+    private target BYPASSED the SSRF guard entirely.
+
+    Fix: guard reads undecoded bytes (post_data_buffer); SSRF decisions are
+    URL/IP policy only. These tests prove:
+      - binary POST to PUBLIC target: guard alive, exact body replayed
+      - binary POST to PRIVATE target: aborted, endpoint NEVER receives it
+    """
+
+    BINARY_BODY = gzip.compress(b"binary payload " * 50)
+
+    def _driver_url(self, server, target):
+        return server.url(f"/binary-post-driver?to={target}")
+
+    def test_binary_post_to_public_allowed(self, isolated, monkeypatch):
+        server = isolated
+        driver = "/binary-post-driver?to=/binary-post"
+        monkeypatch.setattr(
+            webget,
+            "_is_private_target",
+            _fake_public_policy(server, extra_public=(driver, "/binary-post")),
+        )
+        server.reset_counters()
+        res = asyncio.run(_browser_fetch(server.url(driver)))
+        out = res[server.url(driver)]
+        assert out["status"] == "success", out
+        # The gzip POST went through the guard; the server received the
+        # EXACT bytes (guard replayed them via route.fetch, no crash).
+        assert server.hits_for("/binary-post") == 1
+        assert server.last_body("/binary-post") == self.BINARY_BODY
+
+    def test_binary_post_to_private_blocked(self, isolated, monkeypatch):
+        server = isolated
+        driver = "/binary-post-driver?to=/binary-post-private"
+        monkeypatch.setattr(
+            webget,
+            "_is_private_target",
+            _fake_public_policy(server, extra_public=(driver,)),
+        )
+        server.reset_counters()
+        res = asyncio.run(_browser_fetch(server.url(driver)))
+        out = res[server.url(driver)]
+        assert out["status"] == "success", out  # driver page itself is fine
+        # The private sink must NEVER receive the binary POST: with the
+        # 0.7.1 bug the guard crashed before the private check and the
+        # request leaked through (native continue). Zero hits = no bypass.
+        assert server.hits_for("/binary-post-private") == 0, (
+            f"private binary POST leaked {server.hits_for('/binary-post-private')} request(s)"
+        )

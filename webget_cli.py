@@ -414,6 +414,22 @@ class SSRFError(RuntimeError):
     """Raised when a fetch would target a private address."""
 
 
+def _request_body_bytes(request):
+    """Raw request body as bytes for redirect replay, or None.
+
+    Playwright's `request.post_data` decodes the body as UTF-8 text and
+    raises UnicodeDecodeError on binary/compressed bodies (e.g. gzip
+    POSTs, seen on facebook/linkedin). The browser SSRF route guard
+    replays the raw body on manual redirect hops, so it must read the
+    undecoded bytes. Body handling is BEST-EFFORT and must never be part
+    of the SSRF decision, which is URL/IP policy only.
+    """
+    try:
+        return request.post_data_buffer
+    except Exception:  # noqa: BLE001 - body replay is best-effort
+        return None
+
+
 async def _guard_browser_routes(crawler_ctx):
     """Install a Playwright route guard so the browser can never request a
     private address, even through redirects or subresources.
@@ -443,7 +459,9 @@ async def _guard_browser_routes(crawler_ctx):
         # method/body handling: 301/302/303 upgrades redirects to GET per
         # HTTP spec; 307/308 preserve method+body.
         method = request.method
-        body = request.post_data
+        # post_data decodes as UTF-8 and raises on binary/compressed
+        # bodies; read the undecoded bytes instead (best-effort replay).
+        body = _request_body_bytes(request)
 
         for _hop in range(21):
             if _is_private_target(url):
