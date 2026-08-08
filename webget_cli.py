@@ -1061,25 +1061,41 @@ def _fmt_age(ts):
     return f"{int(diff // 86400)}d ago"
 
 
+def list_profiles():
+    """Non-sensitive metadata for every profile dir. Never cookie values."""
+    if not os.path.isdir(_profile_root()):
+        return []
+    out = []
+    for name in sorted(os.listdir(_profile_root())):
+        if not os.path.isdir(profile_dir(name)):
+            continue
+        try:
+            profile_dir(name)  # validates; raises SystemExit on bad names
+            meta = _profile_meta(name)
+            if meta["size"] > 0 or meta["status"] != "unknown":
+                out.append(meta)
+        except SystemExit:
+            # Skip malformed dir names that fail validation (e.g. "..").
+            continue
+    return out
+
+
+def profile_exists(name):
+    """True if name is a valid profile name AND its dir exists."""
+    try:
+        return os.path.isdir(profile_dir(name))
+    except SystemExit:
+        return False
+
+
 def cmd_profiles(json_out):
-    if not os.path.isdir(PROFILE_DIR):
+    if not os.path.isdir(_profile_root()):
         if json_out:
             print("{}")
         else:
             print("PROFILE     LAST USED     SIZE       STATUS\n(no profiles yet)")
         return
-    profiles = []
-    for name in sorted(os.listdir(PROFILE_DIR)):
-        if not os.path.isdir(profile_dir(name)):
-            continue
-        try:
-            profile_dir(name)  # validates name; raises SystemExit on bad names
-            meta = _profile_meta(name)
-            if meta["size"] > 0 or meta["status"] != "unknown":
-                profiles.append(meta)
-        except SystemExit:
-            # Skip malformed dir names that fail validation (e.g. "..").
-            continue
+    profiles = list_profiles()
     if json_out:
         print(json.dumps({p["profile"]: p for p in profiles}, indent=2))
         return

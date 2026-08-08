@@ -91,6 +91,40 @@ class TestProfileSafety:
         assert webget.profile_state_path("campus").startswith("/tmp/override-profiles")
 
 
+# ---------- list_profiles / profile_exists (MCP reuse) ----------
+
+
+class TestListProfiles:
+    def test_empty_root(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(webget, "PROFILE_DIR", str(tmp_path / "profiles"))
+        assert webget.list_profiles() == []
+
+    def test_returns_metadata_only(self, tmp_path, monkeypatch):
+        import json
+
+        monkeypatch.setattr(webget, "PROFILE_DIR", str(tmp_path / "profiles"))
+        d = tmp_path / "profiles" / "sion"
+        (d / "Default").mkdir(parents=True)
+        state = {
+            "cookies": [{"name": "secret", "value": "SUPERSECRET", "domain": ".x.com", "expires": -1}]
+        }
+        (d / "storage_state.json").write_text(json.dumps(state))
+        meta = webget.list_profiles()
+        assert len(meta) == 1
+        assert meta[0]["profile"] == "sion"
+        assert "status" in meta[0]
+        # cookie values must NEVER appear in the listing
+        assert "SUPERSECRET" not in json.dumps(meta)
+
+    def test_profile_exists(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(webget, "PROFILE_DIR", str(tmp_path / "profiles"))
+        (tmp_path / "profiles" / "sion").mkdir(parents=True)
+        assert webget.profile_exists("sion") is True
+        assert webget.profile_exists("nope") is False
+        assert webget.profile_exists("../evil") is False  # invalid = not exists
+        assert webget.profile_exists("") is False
+
+
 # ---------- auth state classifier ----------
 
 
