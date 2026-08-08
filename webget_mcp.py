@@ -22,6 +22,7 @@ Dependencies: mcp (pip install mcp). webget_cli.py must live next to this file.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -52,6 +53,23 @@ def _clamp(name, value, lo, hi):
     return None
 
 
+def _validate_profile(profile):
+    """Validate a profile name for authenticated fetches.
+
+    Returns an error string, or None when the profile exists and is usable.
+    Invalid names (path traversal etc.) and unknown profiles are HARD errors:
+    a silent anonymous fallback would return login_required while the agent
+    believes its session was used.
+    """
+    try:
+        pdir = wg.profile_dir(profile)  # raises SystemExit on invalid names
+    except SystemExit:
+        return f"invalid profile name: {profile!r}"
+    if not os.path.isdir(pdir):
+        return f"profile '{profile}' not found"
+    return None
+
+
 @mcp.tool()
 async def search(query: str, n: int = 5) -> list[dict]:
     """Search the web (DuckDuckGo). Returns up to n results with title/url/snippet."""
@@ -68,11 +86,16 @@ async def fetch(
     timeout: int = 20,
     strategy: str = "auto",
     no_cache: bool = False,
+    profile: str | None = None,
 ) -> dict:
     """Scrape a single URL to markdown, with metadata.
 
     strategy: auto|http|crawl4ai|firecrawl. Status values:
     success|login_required|challenge|blocked|error.
+
+    profile: name of a locally stored login session (created with
+    'webget login URL --profile NAME'). Invalid names and unknown
+    profiles are hard errors (never a silent anonymous fallback).
     """
     if strategy not in _VALID_STRATEGIES:
         return {"status": "error", "error": f"unknown strategy: {strategy}"}
@@ -85,12 +108,17 @@ async def fetch(
         err = _clamp(name, value, lo, hi)
         if err:
             return {"status": "error", "error": err}
+    if profile is not None:
+        err = _validate_profile(profile)
+        if err:
+            return {"status": "error", "error": err}
     res = await wg.scrape_many(
         [url],
         max_chars=max_chars,
         per_url_timeout=timeout,
         strategy=strategy,
         no_cache=no_cache,
+        profile=profile,
     )
     return res.get(url, {})
 

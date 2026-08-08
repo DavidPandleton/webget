@@ -96,6 +96,50 @@ def test_server_stays_alive_after_bad_calls():
     assert "success" in res.content[0].text
 
 
+def test_fetch_invalid_profile_returns_error_not_crash():
+    """profile name with path traversal must return a clean error and the
+    server must stay alive (SystemExit from profile_dir must not escape)."""
+
+    async def run():
+        params = StdioServerParameters(command=sys.executable, args=[str(MCP)])
+        async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+            await session.initialize()
+            res = await session.call_tool(
+                "fetch",
+                {"url": "https://example.com", "profile": "../etc", "no_cache": True},
+            )
+            ok = await session.call_tool(
+                "fetch",
+                {"url": "https://example.com", "strategy": "http", "no_cache": True},
+            )
+            return res, ok
+
+    res, ok = _run(run())
+    assert not res.isError
+    assert "invalid profile name" in res.content[0].text
+    assert "success" in ok.content[0].text  # server alive after the bad call
+
+
+def test_fetch_nonexistent_profile_returns_error():
+    """A valid-looking profile that does not exist is a hard error, never a
+    silent anonymous fallback (which would return login_required while the
+    agent believes the session was used)."""
+
+    async def run():
+        params = StdioServerParameters(command=sys.executable, args=[str(MCP)])
+        async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+            await session.initialize()
+            res = await session.call_tool(
+                "fetch",
+                {"url": "https://example.com", "profile": "ghost", "no_cache": True},
+            )
+            return res
+
+    res = _run(run())
+    assert not res.isError
+    assert "profile 'ghost' not found" in res.content[0].text
+
+
 if __name__ == "__main__":
     import pytest
 
