@@ -3,6 +3,7 @@
 Network-light: search results are asserted as a list (may be empty when
 DuckDuckGo is rate-limiting), fetch targets example.com over the http path.
 """
+
 import asyncio
 import json
 import sys

@@ -3,6 +3,7 @@
 Spawns webget_mcp.py as a stdio subprocess and drives it like an MCP
 client would. Requires the mcp client SDK (installed via the [mcp] extra).
 """
+
 import asyncio
 import sys
 from pathlib import Path
@@ -37,6 +38,7 @@ def test_invalid_strategy_returns_error_not_crash():
     Before the guard, _ladder raised SystemExit (a BaseException) which
     killed the whole server process and hung the client.
     """
+
     async def run():
         params = StdioServerParameters(command=sys.executable, args=[str(MCP)])
         async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
@@ -55,6 +57,7 @@ def test_invalid_strategy_returns_error_not_crash():
 def test_firecrawl_without_key_returns_error_not_crash():
     """strategy='firecrawl' without WEBGET_FIRECRAWL_KEY must not kill the
     server either (SystemExit from _ladder)."""
+
     async def run():
         params = StdioServerParameters(command=sys.executable, args=[str(MCP)])
         async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
@@ -73,6 +76,7 @@ def test_firecrawl_without_key_returns_error_not_crash():
 def test_server_stays_alive_after_bad_calls():
     """The same server process that handled a bad strategy call must still
     answer a normal fetch afterwards."""
+
     async def run():
         params = StdioServerParameters(command=sys.executable, args=[str(MCP)])
         async with stdio_client(params) as (read, write), ClientSession(read, write) as session:

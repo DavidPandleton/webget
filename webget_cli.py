@@ -36,10 +36,13 @@ Session management:
 
 import asyncio
 import hashlib
+import ipaddress
 import json
 import os
 import re
+import socket
 import sys
+import tempfile
 import time
 
 
@@ -86,10 +89,14 @@ CACHE_DIR = os.path.expanduser("~/.cache/webget")
 
 
 def _cache_path(url, cookies, headers, max_chars, profile=None):
+    # Cookies and headers are sorted so semantically identical states (same
+    # cookie set in different order) share one cache entry.
+    ck = sorted(cookies or [], key=lambda c: (c.get("domain", ""), c.get("name", "")))
+    hd = {k: v for k, v in sorted((headers or {}).items())}
     key = hashlib.sha1(
         f"{profile or 'public'}|{url}|{max_chars}|"
-        f"{json.dumps(cookies or [], sort_keys=True)}|"
-        f"{json.dumps(headers or {}, sort_keys=True)}".encode()
+        f"{json.dumps(ck, sort_keys=True)}|"
+        f"{json.dumps(hd, sort_keys=True)}".encode()
     ).hexdigest()
     return os.path.join(CACHE_DIR, key + ".json")
 
@@ -112,9 +119,21 @@ def cache_get(url, cookies, headers, max_chars, ttl, fresh=False, profile=None):
 def cache_put(url, cookies, headers, max_chars, data, profile=None):
     os.makedirs(CACHE_DIR, exist_ok=True)
     p = _cache_path(url, cookies, headers, max_chars, profile)
+    tmp = None
     try:
-        with open(p, "w") as f:
+        # Atomic write: each writer gets its OWN unique tmp file (mkstemp),
+        # then an atomic rename. A shared "<path>.tmp" would let concurrent
+        # writers interleave bytes in the same file, so the rename would
+        # publish a corrupt document. mkstemp guarantees uniqueness per
+        # writer and lives in the same directory (same filesystem, so
+        # os.replace stays atomic).
+        fd, tmp = tempfile.mkstemp(
+            dir=os.path.dirname(p), prefix=os.path.basename(p) + ".", suffix=".tmp"
+        )
+        with os.fdopen(fd, "w") as f:
             json.dump({**data, "fetched_at": time.time()}, f)
+        os.replace(tmp, p)
+        tmp = None  # consumed by the rename
         # simple eviction: keep newest 400 of 500
         try:
             files = [
@@ -128,6 +147,12 @@ def cache_put(url, cookies, headers, max_chars, data, profile=None):
             pass
     except OSError:
         pass  # cache is best-effort
+    finally:
+        if tmp is not None:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 
 def parse_opts(args):
@@ -225,9 +250,27 @@ def _extract_markdown(html):
         return ""
 
 
+# Max response body webget will read from the HTTP fast path (bytes).
+# Guards against memory exhaustion from giant/binary downloads.
+MAX_RESPONSE_BYTES = 25 * 1024 * 1024
+
+# Default cap on concurrent fetches per ladder pass. Unbounded gather on a
+# 500-URL batch would open 500 connections (and later 500 browser pages).
+_DEFAULT_CONCURRENCY = 10
+
+
 async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
-    """Fast path: plain HTTP GET + local markdown extraction."""
+    """Fast path: plain HTTP GET + local markdown extraction.
+
+    SSRF guard: the initial URL is checked; redirect hops are followed
+    MANUALLY (follow_redirects=False) so every hop is checked against the
+    private-address policy before being requested. Response body is read
+    with a hard cap (MAX_RESPONSE_BYTES).
+    """
     import httpx
+
+    if _is_private_target(url):
+        raise SSRFError(f"blocked by SSRF guard: private address {url}")
 
     hdrs = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -240,30 +283,62 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
         from urllib.parse import urlparse
 
         host = (urlparse(url).hostname or "").lower()
+        now = time.time()
         if host:
             for c in cookies:
                 d = (c.get("domain") or "").lstrip(".").lower()
                 if d and (host == d or host.endswith("." + d)):
+                    exp = c.get("expires") or -1
+                    # Skip expired cookies: session cookies (expires<0) and
+                    # future-expiry cookies are sent; past-expiry are not.
+                    if 0 <= exp < now:
+                        continue
                     cj[c["name"]] = c["value"]
+
+    current = url
+    redirects = 0
     async with httpx.AsyncClient(
-        follow_redirects=True, timeout=timeout, headers=hdrs, cookies=cj
+        follow_redirects=False, timeout=timeout, headers=hdrs, cookies=cj
     ) as client:
-        r = await client.get(url)
-        ctype = r.headers.get("content-type", "")
-        if "html" not in ctype and "text" not in ctype:
-            raise RuntimeError(f"not HTML ({ctype or 'unknown'})")
-        html = r.text
-        title = ""
-        m = re.search(r"<title[^>]*>(.*?)</title>", html, re.DOTALL | re.IGNORECASE)
-        if m:
-            title = re.sub(r"\s+", " ", m.group(1)).strip()
-        md = await asyncio.to_thread(_extract_markdown, html)
-        return {
-            "title": title,
-            "markdown": md[:max_chars],
-            "status_code": r.status_code,
-            "html": html[:8000],
-        }
+        while True:
+            if _is_private_target(current):
+                raise SSRFError(f"blocked by SSRF guard: private address {current}")
+            # stream=True is REQUIRED: client.get() would buffer the whole
+            # body into memory before our cap could stop it.
+            async with client.stream("GET", current) as r:
+                if r.status_code in (301, 302, 303, 307, 308):
+                    loc = r.headers.get("location")
+                    if not loc:
+                        break
+                    redirects += 1
+                    if redirects > 20:
+                        raise RuntimeError("too many redirects")
+                    current = str(httpx.URL(current).join(loc))
+                    continue
+                ctype = r.headers.get("content-type", "")
+                if "html" not in ctype and "text" not in ctype:
+                    raise RuntimeError(f"not HTML ({ctype or 'unknown'})")
+                # Read with a hard cap while streaming, so a giant/binary
+                # body cannot exhaust memory.
+                chunks = []
+                total = 0
+                async for chunk in r.aiter_bytes():
+                    total += len(chunk)
+                    if total > MAX_RESPONSE_BYTES:
+                        raise RuntimeError(f"response too large (> {MAX_RESPONSE_BYTES} bytes)")
+                    chunks.append(chunk)
+                html = b"".join(chunks).decode("utf-8", errors="replace")
+                title = ""
+                m = re.search(r"<title[^>]*>(.*?)</title>", html, re.DOTALL | re.IGNORECASE)
+                if m:
+                    title = re.sub(r"\s+", " ", m.group(1)).strip()
+                md = await asyncio.to_thread(_extract_markdown, html)
+                return {
+                    "title": title,
+                    "markdown": md[:max_chars],
+                    "status_code": r.status_code,
+                    "html": html[:8000],
+                }
 
 
 def _warn(msg):
@@ -273,6 +348,155 @@ def _warn(msg):
 
 def firecrawl_key():
     return os.environ.get("WEBGET_FIRECRAWL_KEY", "").strip()
+
+
+# ---------- SSRF guard ----------
+#
+# Default policy: refuse to fetch loopback/private/link-local/unspecified
+# addresses, INCLUDING hostnames that resolve to them and redirect hops.
+# This protects local services, cloud metadata (169.254.169.254), and other
+# private hosts from being reached through webget. Legitimate intranet use
+# can opt out with WEBGET_ALLOW_PRIVATE=1 (set by the caller deliberately).
+
+_PRIVATE_IP_CACHE = {}
+
+
+def _ip_is_private(ip):
+    return (
+        False
+        or ip.is_private
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _hostname_private(host):
+    """Resolve a hostname once and check every address. Cached per process."""
+    if host in _PRIVATE_IP_CACHE:
+        return _PRIVATE_IP_CACHE[host]
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        # DNS failure is not a privacy violation; let the fetch fail normally.
+        _PRIVATE_IP_CACHE[host] = False
+        return False
+    private = any(_ip_is_private(ipaddress.ip_address(i[4][0])) for i in infos)
+    if len(_PRIVATE_IP_CACHE) < 512:
+        _PRIVATE_IP_CACHE[host] = private
+    return private
+
+
+def _is_private_target(url, allow_private=None):
+    """True if url targets a private/loopback/link-local address, either by
+    literal IP or by hostname resolution."""
+    if allow_private is None:
+        allow_private = os.environ.get("WEBGET_ALLOW_PRIVATE") == "1"
+    if allow_private:
+        return False
+    from urllib.parse import urlparse
+
+    host = urlparse(url).hostname
+    if not host:
+        return False  # malformed URL; other validation handles it
+    host = host.strip("[]").lower()
+    # FQDN root notation: '127.0.0.1.' and 'localhost.' are the same hosts.
+    host = host.rstrip(".")
+    try:
+        ip = ipaddress.ip_address(host)
+        return _ip_is_private(ip)
+    except ValueError:
+        return _hostname_private(host)
+
+
+class SSRFError(RuntimeError):
+    """Raised when a fetch would target a private address."""
+
+
+async def _guard_browser_routes(crawler_ctx):
+    """Install a Playwright route guard so the browser can never request a
+    private address, even through redirects or subresources.
+
+    Crawl4AI does not expose a per-hop URL hook, and Playwright route
+    handlers only fire for the FIRST request of a redirect chain (verified
+    experimentally: the second request of a 302 chain never re-enters the
+    route handler, it is followed inside Chromium). So EVERY request -
+    navigation AND subresource - is fetched manually hop-by-hop with
+    max_redirects=0, the SSRF policy is checked at every hop, and only a
+    fully-vetted response is fulfilled to the browser. A redirect inside a
+    subresource therefore cannot escape the policy: the hop target is
+    checked BEFORE it is fetched.
+    """
+    try:
+        bm = crawler_ctx.crawler_strategy.browser_manager
+        browser = bm.default_context if bm else None
+        if browser is None or not hasattr(browser, "on"):
+            return
+    except Exception:  # noqa: BLE001 - guard is best-effort; pre-check still applies
+        return
+
+    async def guard(route, request):
+        from urllib.parse import urljoin
+
+        url = request.url
+        # method/body handling: 301/302/303 upgrades redirects to GET per
+        # HTTP spec; 307/308 preserve method+body.
+        method = request.method
+        body = request.post_data
+
+        for _hop in range(21):
+            if _is_private_target(url):
+                try:
+                    await route.abort()
+                except Exception:  # noqa: BLE001, S110 - already aborted
+                    pass
+                return
+            try:
+                resp = await route.fetch(
+                    url=url,
+                    method=method,
+                    headers=request.headers,
+                    post_data=body,
+                    max_redirects=0,
+                )
+            except Exception:  # noqa: BLE001 - fetch unsupported (e.g. ws),
+                # let the browser handle it; the initial URL was already
+                # checked and most requests succeed through the manual path.
+                try:
+                    await route.continue_()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+                return
+            if resp.status in (301, 302, 303, 307, 308):
+                loc = resp.headers.get("location")
+                if not loc:
+                    break
+                url = urljoin(url, loc)
+                if resp.status in (301, 302, 303):
+                    method = "GET"
+                    body = None
+                continue
+            try:
+                await route.fulfill(response=resp)
+            except Exception:  # noqa: BLE001, S110 - page closed
+                pass
+            return
+        try:
+            await route.abort()
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+    async def register(ctx):
+        try:
+            await ctx.route("**/*", guard)
+        except Exception:  # noqa: BLE001, S110 - context closing; skip
+            pass
+
+    for ctx in list(browser.contexts):
+        await register(ctx)
+    # Crawl4AI may create the crawling context lazily on first navigation.
+    browser.on("context", lambda ctx: asyncio.create_task(register(ctx)))
 
 
 PROFILE_DIR = os.path.expanduser("~/.local/share/webget/profiles")
@@ -356,7 +580,25 @@ def _auth_state(result, profile):
 
 
 async def fetch_firecrawl(url, max_chars, key, timeout=30):
-    """Firecrawl escape hatch: POST /v1/scrape, formats markdown."""
+    """Firecrawl escape hatch: POST /v1/scrape, formats markdown.
+
+    SECURITY LIMITATION (documented, not mitigated): the actual page fetch
+    is performed by Firecrawl on THEIR infrastructure. The Firecrawl API
+    provides no parameter to disable redirects, validate redirect
+    destinations, receive the redirect chain, or enforce allowed
+    hosts/IPs (verified against docs.firecrawl.dev 2026-08). webget
+    therefore guarantees only:
+      - a private/internal URL is never SENT to Firecrawl (pre-check in
+        scrape_many blocks it before the ladder runs);
+      - Firecrawl is strictly opt-in (requires WEBGET_FIRECRAWL_KEY and an
+        explicit strategy="firecrawl" or auto ladder with key).
+    What webget CANNOT control: any redirect Firecrawl follows after the
+    initial URL, including redirects into addresses that resolve only on
+    Firecrawl's network. This is a REMOTE-provider limitation, distinct
+    from local SSRF protection (HTTP/browser paths fetch from this
+    machine and are fully guarded). Do not rely on Firecrawl as an SSRF
+    boundary; treat URLs sent to it as visible to a third party.
+    """
     import httpx
 
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -468,11 +710,31 @@ async def scrape_many(
     strategy="auto",
     profile=None,
     no_cache=False,
+    max_concurrency=None,
 ):
     steps = _ladder(strategy, firecrawl_key())
     results = {}
     missing = []
+    # Deduplicate: identical URLs must not cause duplicate work or races.
+    seen = set()
     for u in urls:
+        if u in seen:
+            continue
+        seen.add(u)
+        # SSRF guard applies to every strategy, not just the HTTP fast path:
+        # never hand a private target to the browser or to Firecrawl either.
+        if _is_private_target(u):
+            results[u] = {
+                "title": "",
+                "markdown": "",
+                "status": "error",
+                "method": "",
+                "cached": False,
+                "attempts": 0,
+                "error": f"blocked by SSRF guard: private address {u}",
+                "auth": {"profile": profile, "authenticated": None, "state": "error"},
+            }
+            continue
         hit = None if no_cache else cache_get(u, cookies, headers, max_chars, ttl, fresh, profile)
         if hit:
             results[u] = _normalize_hit(hit)
@@ -480,6 +742,8 @@ async def scrape_many(
             missing.append(u)
     if not missing:
         return results
+
+    sem = asyncio.Semaphore(max_concurrency or _DEFAULT_CONCURRENCY)
 
     attempts = {u: 0 for u in missing}
     reasons = {u: [] for u in missing}
@@ -517,19 +781,20 @@ async def scrape_many(
     if "http" in steps:
 
         async def http_one(url):
-            try:
-                res = await fetch_http(
-                    url,
-                    max_chars,
-                    _effective_cookies(cookies, profile),
-                    headers,
-                    timeout=per_url_timeout,
-                )
-                return url, await record(url, "http", res=res)
-            except TimeoutError:
-                return url, await record(url, "http", exc=TimeoutError("timeout"))
-            except Exception as e:  # noqa: BLE001 - record reason, ladder continues
-                return url, await record(url, "http", exc=e)
+            async with sem:
+                try:
+                    res = await fetch_http(
+                        url,
+                        max_chars,
+                        _effective_cookies(cookies, profile),
+                        headers,
+                        timeout=per_url_timeout,
+                    )
+                    return url, await record(url, "http", res=res)
+                except TimeoutError:
+                    return url, await record(url, "http", exc=TimeoutError("timeout"))
+                except Exception as e:  # noqa: BLE001 - record reason, ladder continues
+                    return url, await record(url, "http", exc=e)
 
         for url, out in await asyncio.gather(*(http_one(u) for u in pending)):
             if out:
@@ -560,16 +825,20 @@ async def scrape_many(
                 )
                 cfg = CrawlerRunConfig()
                 async with AsyncWebCrawler(config=bc, verbose=False) as crawler_ctx:
+                    await _guard_browser_routes(crawler_ctx)
 
                     async def crawl_one(url):
-                        try:
-                            res = await _crawl4ai_once(crawler_ctx, cfg, url, per_url_timeout)
-                            res["markdown"] = res.get("markdown", "")[:max_chars]
-                            return url, await record(url, "crawl4ai", res=res)
-                        except TimeoutError:
-                            return url, await record(url, "crawl4ai", exc=TimeoutError("timeout"))
-                        except Exception as e:  # noqa: BLE001 - record reason, ladder continues
-                            return url, await record(url, "crawl4ai", exc=e)
+                        async with sem:
+                            try:
+                                res = await _crawl4ai_once(crawler_ctx, cfg, url, per_url_timeout)
+                                res["markdown"] = res.get("markdown", "")[:max_chars]
+                                return url, await record(url, "crawl4ai", res=res)
+                            except TimeoutError:
+                                return url, await record(
+                                    url, "crawl4ai", exc=TimeoutError("timeout")
+                                )
+                            except Exception as e:  # noqa: BLE001 - record reason, ladder continues
+                                return url, await record(url, "crawl4ai", exc=e)
 
                     for url, out in await asyncio.gather(*(crawl_one(u) for u in pending)):
                         if out:
@@ -583,7 +852,9 @@ async def scrape_many(
                             # lives on browser_manager instead) - go direct.
                             bm = crawler_ctx.crawler_strategy.browser_manager
                             if bm and bm.default_context is not None:
-                                await bm.default_context.storage_state(path=profile_state_path(profile))
+                                await bm.default_context.storage_state(
+                                    path=profile_state_path(profile)
+                                )
                             else:
                                 _warn(
                                     f"profile '{profile}' used but no browser context "
@@ -596,13 +867,14 @@ async def scrape_many(
     if pending and "firecrawl" in steps:
 
         async def fc_one(url):
-            try:
-                res = await fetch_firecrawl(
-                    url, max_chars, firecrawl_key(), timeout=per_url_timeout
-                )
-                return url, await record(url, "firecrawl", res=res)
-            except Exception as e:  # noqa: BLE001 - record reason, ladder continues
-                return url, await record(url, "firecrawl", exc=e)
+            async with sem:
+                try:
+                    res = await fetch_firecrawl(
+                        url, max_chars, firecrawl_key(), timeout=per_url_timeout
+                    )
+                    return url, await record(url, "firecrawl", res=res)
+                except Exception as e:  # noqa: BLE001 - record reason, ladder continues
+                    return url, await record(url, "firecrawl", exc=e)
 
         for url, out in await asyncio.gather(*(fc_one(u) for u in pending)):
             if out:
@@ -667,9 +939,19 @@ def _read_json(path):
 
 
 def _write_json(path, data):
-    """Sync helper for to_thread: write JSON."""
-    with open(path, "w") as f:
-        json.dump(data, f)
+    """Sync helper for to_thread: atomic JSON write (unique tmp + rename)."""
+    fd, tmp = tempfile.mkstemp(
+        dir=os.path.dirname(path), prefix=os.path.basename(path) + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 # ---------- Phase 4: session management UX ----------
@@ -855,6 +1137,15 @@ def _logout_domain_regex(host):
     return re.compile(r"^(\.)?([^.]+\.)*" + re.escape(host) + r"$")
 
 
+def _prune_storage_cookies(state, host):
+    """Remove cookies belonging to host (and its subdomains) from a
+    storage_state dict. Returns (new_state, removed_count)."""
+    cookies = state.get("cookies") or []
+    kept = [c for c in cookies if not _cookie_belongs_to(c.get("domain", ""), host)]
+    state["cookies"] = kept
+    return state, len(cookies) - len(kept)
+
+
 async def _logout_flow(site, profile):
     from playwright.async_api import async_playwright
 
@@ -867,10 +1158,7 @@ async def _logout_flow(site, profile):
     if os.path.exists(state_p):
         try:
             state = await asyncio.to_thread(_read_json, state_p)
-            cookies = state.get("cookies") or []
-            kept = [c for c in cookies if not _cookie_belongs_to(c.get("domain", ""), host)]
-            removed = len(cookies) - len(kept)
-            state["cookies"] = kept
+            state, removed = _prune_storage_cookies(state, host)
             await asyncio.to_thread(_write_json, state_p, state)
         except (json.JSONDecodeError, OSError) as e:
             return False, f"could not read profile storage state: {e}"
@@ -970,7 +1258,12 @@ def main():
 
     if cmd == "s":
         n = limit or (int(args[2]) if len(args) > 2 else 5)
-        for i, r in enumerate(search(q, n=n)):
+        try:
+            results = search(q, n=n)
+        except Exception as e:  # noqa: BLE001 - surface a clean error, not a traceback
+            print(f"error: search failed: {e}")
+            sys.exit(1)
+        for i, r in enumerate(results):
             print(f"{i + 1}. {r['title']}\n   {r['url']}\n   {r['snippet'][:200]}\n")
 
     elif cmd == "u":
@@ -1017,7 +1310,11 @@ def main():
         n = limit or (int(args[2]) if len(args) > 2 else 3)
         max_chars = max_chars_override or 4000
         timeout = timeout_override or 20
-        results = search(q, n=n)
+        try:
+            results = search(q, n=n)
+        except Exception as e:  # noqa: BLE001 - surface a clean error, not a traceback
+            print(f"error: search failed: {e}")
+            sys.exit(1)
         urls = [r["url"] for r in results]
         scraped = asyncio.run(
             scrape_many(
