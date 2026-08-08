@@ -29,7 +29,7 @@ def test_tools_listed():
             tools = await session.list_tools()
             return [t.name for t in tools.tools]
 
-    assert _run(run()) == ["search", "fetch", "search_fetch"]
+    assert _run(run()) == ["search", "fetch", "search_fetch", "list_profiles"]
 
 
 def test_invalid_strategy_returns_error_not_crash():
@@ -161,6 +161,35 @@ def test_search_fetch_invalid_profile_returns_error_not_crash():
     assert not res.isError
     assert "invalid profile name" in res.content[0].text
     assert not ok.isError  # server alive after the bad call
+
+
+def test_list_profiles_tool_metadata_only(tmp_path):
+    """list_profiles must list the session and NEVER leak cookie values."""
+    import json
+    import os
+
+    root = tmp_path / "profiles"
+    d = root / "sion"
+    (d / "Default").mkdir(parents=True)
+    (d / "storage_state.json").write_text(
+        json.dumps(
+            {"cookies": [{"name": "s", "value": "SUPERSECRET", "domain": ".x.com", "expires": -1}]}
+        )
+    )
+
+    async def run():
+        env = {**os.environ, "WEBGET_PROFILE_DIR": str(root)}
+        params = StdioServerParameters(command=sys.executable, args=[str(MCP)], env=env)
+        async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+            await session.initialize()
+            res = await session.call_tool("list_profiles", {})
+            return res
+
+    res = _run(run())
+    assert not res.isError
+    text = res.content[0].text
+    assert "sion" in text
+    assert "SUPERSECRET" not in text  # cookie values never exposed
 
 
 if __name__ == "__main__":

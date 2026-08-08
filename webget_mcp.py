@@ -80,6 +80,14 @@ async def search(query: str, n: int = 5) -> list[dict]:
 
 
 @mcp.tool()
+def list_profiles() -> list[dict]:
+    """List locally stored login sessions (profiles) with non-sensitive
+    metadata: name, last used, size, status. Cookie values are never
+    returned. Use with fetch(profile=...) to scrape authenticated pages."""
+    return wg.list_profiles()
+
+
+@mcp.tool()
 async def fetch(
     url: str,
     max_chars: int = 10000,
