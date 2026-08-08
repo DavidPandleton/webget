@@ -517,7 +517,22 @@ async def _guard_browser_routes(crawler_ctx):
     browser.on("context", lambda ctx: asyncio.create_task(register(ctx)))
 
 
-PROFILE_DIR = os.path.expanduser("~/.local/share/webget/profiles")
+def _profile_root():
+    """Profile root dir; WEBGET_PROFILE_DIR env override for tests/ops.
+
+    Order: env override first, then a monkeypatched/overridden PROFILE_DIR
+    module attribute (existing tests patch it directly), then the default.
+    """
+    env = os.environ.get("WEBGET_PROFILE_DIR")
+    if env:
+        return env
+    patched = globals().get("PROFILE_DIR")
+    if patched:
+        return patched
+    return os.path.expanduser("~/.local/share/webget/profiles")
+
+
+PROFILE_DIR = _profile_root()
 _PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -525,7 +540,7 @@ def profile_dir(name):
     """Return profile dir, rejecting path traversal / weird names."""
     if not name or not _PROFILE_NAME_RE.match(name) or name in (".", ".."):
         raise SystemExit(f"invalid profile name: {name!r}")
-    return os.path.join(PROFILE_DIR, name)
+    return os.path.join(_profile_root(), name)
 
 
 def profile_state_path(profile):

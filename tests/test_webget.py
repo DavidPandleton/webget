@@ -85,6 +85,11 @@ class TestProfileSafety:
         p = webget.profile_state_path("campus")
         assert p.endswith(os.path.join("campus", "storage_state.json"))
 
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setenv("WEBGET_PROFILE_DIR", "/tmp/override-profiles")
+        assert webget.profile_dir("campus").startswith("/tmp/override-profiles")
+        assert webget.profile_state_path("campus").startswith("/tmp/override-profiles")
+
 
 # ---------- auth state classifier ----------
 
