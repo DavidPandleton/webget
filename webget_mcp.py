@@ -92,7 +92,7 @@ async def login(
     url: str,
     profile: str,
     wait_seconds: int = 120,
-    headless: bool = False,
+    headless: bool | None = None,
 ) -> dict:
     """Open a browser session for profile, navigate to url, and persist
     the login session.
@@ -100,13 +100,14 @@ async def login(
     This is NON-INTERACTIVE: the MCP stdin is the JSON-RPC stream, so there
     is no Enter keypress. The flow polls the browser context until session
     cookies appear (the Set-Cookie side effect of the login handshake) or
-    wait_seconds elapses, then persists. Use a headful browser (default) so
-    a human can complete the login in the window. Returns the persisted
-    profile state; cookie values are never returned.
+    wait_seconds elapses, then persists. headless defaults to auto: headful
+    when a display is available (a human completes the login in the window),
+    headless on servers without X/Wayland, where headful cannot launch.
+    Returns the persisted profile state; cookie values are never returned.
     """
-    for name, value, lo, hi in (
-        ("wait_seconds", wait_seconds, 5, 600),
-    ):
+    if headless is None:
+        headless = not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    for name, value, lo, hi in (("wait_seconds", wait_seconds, 5, 600),):
         err = _clamp(name, value, lo, hi)
         if err:
             return {"status": "error", "error": err}
@@ -119,8 +120,12 @@ async def login(
         return {"status": "error", "error": str(e)}
     try:
         await wg._login_flow(
-            url, profile, headless, wait_seconds=wait_seconds,
-            interactive=False, quiet=True,
+            url,
+            profile,
+            headless,
+            wait_seconds=wait_seconds,
+            interactive=False,
+            quiet=True,
         )
     except SystemExit as e:
         return {"status": "error", "error": str(e)}

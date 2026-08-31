@@ -525,7 +525,34 @@ class TestStrategyMemory:
         """_learn_strategy writes to CACHE_DIR; _load_strategy_memory reads it back."""
         webget._learn_strategy("example.com", "http")
         memory = webget._load_strategy_memory()
-        assert memory.get("example.com") == "http"
+        assert memory.get("example.com", {}).get("method") == "http"
+
+    def test_stale_entry_expires(self, isolated_env, monkeypatch):
+        """An entry older than the TTL is dropped on load, so a domain that
+        once needed a browser can retry the cheap HTTP path later."""
+        webget._learn_strategy("old.com", "crawl4ai")
+        # Age the entry beyond the TTL by shifting the clock forward.
+        real_time = webget.time.time
+        monkeypatch.setattr(webget.time, "time", lambda: real_time() + webget._STRATEGY_MEMORY_TTL + 1)
+        assert webget._load_strategy_memory() == {}
+
+    def test_fresh_entry_survives(self, isolated_env):
+        """An entry within the TTL is kept."""
+        webget._learn_strategy("new.com", "crawl4ai")
+        mem = webget._load_strategy_memory()
+        assert mem["new.com"]["method"] == "crawl4ai"
+
+    def test_legacy_string_format_migrates(self, isolated_env):
+        """Pre-expiry files (plain string values) load as fresh entries."""
+        import json
+        import os
+
+        p = webget._strategy_memory_path()
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            json.dump({"legacy.com": "http"}, f)
+        mem = webget._load_strategy_memory()
+        assert mem["legacy.com"]["method"] == "http"
 
     def test_reorder_promotes_preferred(self, isolated_env):
         """_reorder_steps_by_domain moves the known strategy to the front."""
@@ -559,7 +586,10 @@ class TestStrategyMemory:
         webget._learn_strategy("a.com", "http")
         webget._learn_strategy("b.com", "crawl4ai")
         memory = webget._load_strategy_memory()
-        assert memory == {"a.com": "http", "b.com": "crawl4ai"}
+        assert {k: v["method"] for k, v in memory.items()} == {
+            "a.com": "http",
+            "b.com": "crawl4ai",
+        }
 
     def test_batch_reorder_respects_majority_domain(self, isolated_env):
         """Majority domain from a batch of URLs drives the reorder."""
