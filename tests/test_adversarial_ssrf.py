@@ -98,14 +98,14 @@ class TestSSRFBlocking:
         the initial URL passed the guard (e.g. it was public)."""
         import pytest
 
-        real = webget._is_private_target
+        real = webget._private_ip_for
         initial = server.url("/redirect-private")
 
         def guarded(url):
             # initial URL passes (as if public); every other URL checked for real
-            return real(url) if url != initial else False
+            return real(url) if url != initial else None
 
-        monkeypatch.setattr(webget, "_is_private_target", guarded)
+        monkeypatch.setattr(webget, "_private_ip_for", guarded)
         with pytest.raises(webget.SSRFError):
             asyncio.run(webget.fetch_http(initial, 2000, timeout=5))
 

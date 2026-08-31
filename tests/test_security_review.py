@@ -83,30 +83,30 @@ class TestRedirectHopPolicy:
         hop check must fire even though the initial URL passed."""
         import pytest
 
-        real = webget._is_private_target
+        real = webget._private_ip_for
         initial = server.url("/redirect-private")
 
         def guarded(url):
-            return real(url) if url != initial else False
+            return real(url) if url != initial else None
 
-        monkeypatch.setattr(webget, "_is_private_target", guarded)
+        monkeypatch.setattr(webget, "_private_ip_for", guarded)
         with pytest.raises(webget.SSRFError):
             asyncio.run(webget.fetch_http(initial, 2000, timeout=5))
 
     def test_multi_hop_into_private_blocked(self, server, isolated_env, monkeypatch):
         """public -> public -> private (3 hops) must still be blocked."""
 
-        real = webget._is_private_target
+        real = webget._private_ip_for
         initial = server.url("/redirect-chain?n=2")  # -> /redirect-chain?n=1 -> /normal
         # craft: first two hops pass (public), third hop lands on /private
         chain = [server.url("/redirect-chain?n=2"), server.url("/redirect-chain?n=1")]
 
         def guarded(url):
             if url in chain or url == server.url("/redirect-chain?n=2"):
-                return False
+                return None
             return real(url)
 
-        monkeypatch.setattr(webget, "_is_private_target", guarded)
+        monkeypatch.setattr(webget, "_private_ip_for", guarded)
         # fetch_http follows hops manually; every hop re-checks
         try:
             asyncio.run(webget.fetch_http(initial, 2000, timeout=5))

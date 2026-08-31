@@ -45,6 +45,7 @@ import socket
 import sys
 import tempfile
 import time
+import warnings
 
 
 def parse_cookie_file(path):
@@ -87,6 +88,13 @@ def parse_headers(raw_headers):
 
 
 CACHE_DIR = os.path.expanduser("~/.cache/webget")
+# Entries older than this can never be served by any reasonable ttl and are
+# swept on write. 30 days matches the default CLI ttl.
+_CACHE_SWEEP_TTL = 3600 * 24 * 30
+# How long a per-domain strategy memory entry stays trusted. Sites change
+# (a JS-heavy page may start server-rendering); a stale preference would
+# skip the cheap HTTP path forever, so entries expire.
+_STRATEGY_MEMORY_TTL = 3600 * 24 * 14
 
 
 def _cache_path(url, cookies, headers, max_chars, profile=None):
@@ -135,15 +143,44 @@ def cache_put(url, cookies, headers, max_chars, data, profile=None):
             json.dump({**data, "fetched_at": time.time()}, f)
         os.replace(tmp, p)
         tmp = None  # consumed by the rename
-        # simple eviction: keep newest 400 of 500
+        # Eviction (lazy: only scans when actually over the cap, so the hot
+        # write path stays cheap). Drop expired entries first - they can
+        # never be served - then keep newest 80% if still over. The cap is
+        # tunable via WEBGET_CACHE_MAX because a 500-file ceiling makes
+        # bulk crawls (thousands of URLs) thrash: every write evicts
+        # useful entries.
+        try:
+            cap = int(os.environ.get("WEBGET_CACHE_MAX", "5000"))
+        except ValueError:
+            cap = 5000
         try:
             files = [
-                os.path.join(CACHE_DIR, f) for f in os.listdir(CACHE_DIR) if f.endswith(".json")
+                os.path.join(CACHE_DIR, f)
+                for f in os.listdir(CACHE_DIR)
+                if f.endswith(".json") and f != "strategy_memory.json"
             ]
-            if len(files) > 500:
-                files.sort(key=os.path.getmtime)
-                for f in files[:-400]:
-                    os.remove(f)
+            if len(files) > cap:
+                now = time.time()
+                live = []
+                for fp in files:
+                    try:
+                        age = now - os.path.getmtime(fp)
+                    except OSError:
+                        continue
+                    if age > _CACHE_SWEEP_TTL:
+                        try:
+                            os.remove(fp)
+                        except OSError:
+                            pass
+                    else:
+                        live.append(fp)
+                if len(live) > cap:
+                    live.sort(key=os.path.getmtime)
+                    for f in live[: len(live) - int(cap * 0.8)]:
+                        try:
+                            os.remove(f)
+                        except OSError:
+                            pass
         except OSError:
             pass
     except OSError:
@@ -247,10 +284,20 @@ def _extract_markdown(html):
     try:
         from markdownify import markdownify as md
 
-        # bullets="*" and heading_style="ATX" match the previous html2text
-        # output style (verified differential 2026-08-08) so the fallback
-        # stays close to 0.7.2 (semantic parity).
-        converted = md(html, bullets="*", heading_style="ATX").strip()
+        # Feeds/sitemaps served as text/html make BeautifulSoup (via
+        # markdownify) warn per document; the HTML parser still produces
+        # usable markdown, so the warning is noise for a CLI.
+        with warnings.catch_warnings():
+            try:
+                from bs4 import XMLParsedAsHTMLWarning
+
+                warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+            except ImportError:
+                pass
+            # bullets="*" and heading_style="ATX" match the previous html2text
+            # output style (verified differential 2026-08-08) so the fallback
+            # stays close to 0.7.2 (semantic parity).
+            converted = md(html, bullets="*", heading_style="ATX").strip()
         return converted if len(converted) > 50 else ""
     except Exception:  # noqa: BLE001 - best-effort extraction, empty is fine
         return ""
@@ -270,6 +317,7 @@ class ResponseTooLarge(Exception):
     is pure waste. scrape_many treats it as terminal, not a ladder step.
     """
 
+
 # Default cap on concurrent fetches per ladder pass. Unbounded gather on a
 # 500-URL batch would open 500 connections (and later 500 browser pages).
 _DEFAULT_CONCURRENCY = 10
@@ -282,11 +330,29 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
     MANUALLY (follow_redirects=False) so every hop is checked against the
     private-address policy before being requested. Response body is read
     with a hard cap (MAX_RESPONSE_BYTES).
+
+    The guard runs the (blocking) resolver in a worker thread bounded by
+    the request timeout: a sick DNS server must not stall the event loop
+    and stretch every httpx timer in a concurrent batch.
     """
     import httpx
 
-    if _is_private_target(url):
-        raise SSRFError(f"blocked by SSRF guard: private address {url}")
+    # One absolute wall-clock budget for the whole request: DNS guard,
+    # connect, redirects, and body streaming all draw from it.
+    deadline = time.monotonic() + timeout
+
+    async def ssrf_guard(target):
+        remaining = deadline - time.monotonic()
+        try:
+            ip = await asyncio.wait_for(
+                asyncio.to_thread(_private_ip_for, target), max(remaining, 0.1)
+            )
+        except TimeoutError:
+            raise TimeoutError(f"DNS resolution exceeded {timeout}s") from None
+        if ip is not None:
+            raise SSRFError(f"blocked by SSRF guard: {target} resolves to private address {ip}")
+
+    await ssrf_guard(url)
 
     hdrs = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -317,8 +383,7 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
         follow_redirects=False, timeout=timeout, headers=hdrs, cookies=cj
     ) as client:
         while True:
-            if _is_private_target(current):
-                raise SSRFError(f"blocked by SSRF guard: private address {current}")
+            await ssrf_guard(current)
             # stream=True is REQUIRED: client.get() would buffer the whole
             # body into memory before our cap could stop it.
             async with client.stream("GET", current) as r:
@@ -340,7 +405,6 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
                 # the body in small chunks over minutes can keep it alive
                 # far past the deadline; enforce an absolute wall-clock cap
                 # here so one slow URL cannot stall the whole batch.
-                deadline = time.monotonic() + timeout
                 chunks = []
                 total = 0
                 async for chunk in r.aiter_bytes():
@@ -396,7 +460,13 @@ def _ip_is_private(ip):
 
 
 def _hostname_private(host):
-    """Resolve a hostname once and check every address. Cached per process."""
+    """Resolve a hostname once and check every address. Cached per process.
+
+    getaddrinfo has no timeout of its own; a sick resolver can block a
+    thread (and, when called from the event loop, the whole loop) for
+    minutes. Callers from async code must use _private_ip_for_async,
+    which bounds this with asyncio.wait_for.
+    """
     if host in _PRIVATE_IP_CACHE:
         return _PRIVATE_IP_CACHE[host]
     try:
@@ -411,6 +481,28 @@ def _hostname_private(host):
     return private
 
 
+def _private_ip_for(url):
+    """Return the offending private IP literal for url, or None if safe.
+
+    Same policy as _is_private_target but reports WHICH address tripped
+    the guard, so the error message names an IP instead of looking like
+    a false positive on a public domain.
+    """
+    if os.environ.get("WEBGET_ALLOW_PRIVATE") == "1":
+        return None
+    from urllib.parse import urlparse
+
+    host = urlparse(url).hostname
+    if not host:
+        return None  # malformed URL; other validation handles it
+    host = host.strip("[]").lower().rstrip(".")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host if _hostname_private(host) else None
+    return host if _ip_is_private(ip) else None
+
+
 def _is_private_target(url, allow_private=None):
     """True if url targets a private/loopback/link-local address, either by
     literal IP or by hostname resolution."""
@@ -418,19 +510,7 @@ def _is_private_target(url, allow_private=None):
         allow_private = os.environ.get("WEBGET_ALLOW_PRIVATE") == "1"
     if allow_private:
         return False
-    from urllib.parse import urlparse
-
-    host = urlparse(url).hostname
-    if not host:
-        return False  # malformed URL; other validation handles it
-    host = host.strip("[]").lower()
-    # FQDN root notation: '127.0.0.1.' and 'localhost.' are the same hosts.
-    host = host.rstrip(".")
-    try:
-        ip = ipaddress.ip_address(host)
-        return _ip_is_private(ip)
-    except ValueError:
-        return _hostname_private(host)
+    return _private_ip_for(url) is not None
 
 
 class SSRFError(RuntimeError):
@@ -701,9 +781,25 @@ def _load_strategy_memory():
     p = _strategy_memory_path()
     try:
         with open(p) as f:
-            return json.load(f)
+            raw = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {}
+    # Normalize to {domain: {"method": str, "ts": float}}. Entries older
+    # than the expiry window are dropped: a site that once needed a
+    # browser may serve plain HTML today (server-side rendering changes),
+    # and a stale "crawl4ai" preference would skip the cheap HTTP path
+    # forever. Plain-string values are the pre-expiry format; treat them
+    # as fresh so an upgrade does not wipe a working memory.
+    out = {}
+    now = time.time()
+    for domain, val in raw.items():
+        if isinstance(val, str):
+            out[domain] = {"method": val, "ts": now}
+        elif isinstance(val, dict) and isinstance(val.get("method"), str):
+            ts = val.get("ts", 0)
+            if now - ts <= _STRATEGY_MEMORY_TTL:
+                out[domain] = {"method": val["method"], "ts": ts}
+    return out
 
 
 def _save_strategy_memory(memory):
@@ -727,9 +823,9 @@ def _learn_strategy(domain, method):
     Only writes when the value actually changes.
     """
     memory = _load_strategy_memory()
-    if memory.get(domain) == method:
+    if (memory.get(domain) or {}).get("method") == method:
         return
-    memory[domain] = method
+    memory[domain] = {"method": method, "ts": time.time()}
     _save_strategy_memory(memory)
 
 
@@ -748,7 +844,8 @@ def _reorder_steps_by_domain(steps, url):
     if not domain:
         return steps
     memory = _load_strategy_memory()
-    preferred = memory.get(domain)
+    entry = memory.get(domain)
+    preferred = entry.get("method") if entry else None
     if not preferred or preferred not in steps:
         return steps
     return [preferred] + [s for s in steps if s != preferred]
@@ -764,6 +861,7 @@ def _normalize_hit(hit):
         "attempts": 1,
         "error": None,
         "auth": hit.get("auth") or {"profile": None, "authenticated": None, "state": "success"},
+        "reasons": [],
     }
 
 
@@ -845,13 +943,41 @@ async def scrape_many(
     missing = []
     # Deduplicate: identical URLs must not cause duplicate work or races.
     seen = set()
+    candidates = []
     for u in urls:
         if u in seen:
             continue
         seen.add(u)
-        # SSRF guard applies to every strategy, not just the HTTP fast path:
-        # never hand a private target to the browser or to Firecrawl either.
-        if _is_private_target(u):
+        candidates.append(u)
+    # SSRF guard applies to every strategy, not just the HTTP fast path:
+    # never hand a private target to the browser or to Firecrawl either.
+    # The check resolves hostnames (blocking); run them concurrently in
+    # worker threads with a hard cap so one sick DNS server cannot stall
+    # the event loop and stretch every timer in the batch. The semaphore
+    # bounds in-flight lookups: the default executor has ~32 threads, and
+    # an unbounded gather would queue later URLs past their own deadline.
+    dns_sem = asyncio.Semaphore(32)
+
+    async def _ssrf_verdict(u):
+        async with dns_sem:
+            try:
+                blocked = await asyncio.wait_for(
+                    asyncio.to_thread(_is_private_target, u), per_url_timeout
+                )
+            except TimeoutError:
+                return u, f"DNS resolution exceeded {per_url_timeout}s"
+            if not blocked:
+                return u, None
+            # Name the offending address when we can (best-effort: callers
+            # that patch _is_private_target may not have a matching
+            # _private_ip_for).
+            ip = await asyncio.to_thread(_private_ip_for, u)
+            return u, f"resolves to private address {ip}" if ip else "targets a private address"
+
+    verdicts = dict(await asyncio.gather(*(_ssrf_verdict(u) for u in candidates)))
+    for u in candidates:
+        bad = verdicts.get(u)
+        if bad:
             results[u] = {
                 "title": "",
                 "markdown": "",
@@ -859,8 +985,9 @@ async def scrape_many(
                 "method": "",
                 "cached": False,
                 "attempts": 0,
-                "error": f"blocked by SSRF guard: private address {u}",
+                "error": f"blocked by SSRF guard: {u} {bad}",
                 "auth": {"profile": profile, "authenticated": None, "state": "error"},
+                "reasons": [{"state": "error", "method": "", "detail": bad}],
             }
             continue
         hit = None if no_cache else cache_get(u, cookies, headers, max_chars, ttl, fresh, profile)
@@ -881,7 +1008,13 @@ async def scrape_many(
         """Classify one strategy result; return success dict or None (keep climbing)."""
         attempts[url] += 1
         if exc is not None or res is None:
-            reasons[url].append(("error", method, str(exc or "no result")))
+            # Some httpx exceptions (ReadTimeout, ConnectTimeout) stringify
+            # to the empty string; a bare "" error is useless to callers,
+            # so fall back to the exception type name.
+            detail = str(exc) if exc is not None else "no result"
+            if not detail.strip():
+                detail = type(exc).__name__
+            reasons[url].append(("error", method, detail))
             return None
         state, authenticated = _auth_state(res, profile)
         if state == "success" and len((res.get("markdown") or "").strip()) >= 100:
@@ -889,6 +1022,7 @@ async def scrape_many(
             # Record which strategy won for this domain so future 'auto'
             # batches can try it first (per-domain strategy memory).
             from urllib.parse import urlparse
+
             domain = urlparse(url).hostname
             if domain:
                 _learn_strategy(domain, method)
@@ -901,6 +1035,10 @@ async def scrape_many(
                 "attempts": attempts[url],
                 "error": None,
                 "auth": auth,
+                # Consistent shape: failures carry the ladder chain; successes
+                # carry an empty list (never null) so consumers can always
+                # iterate reasons without a None check.
+                "reasons": [],
             }
             if not no_cache:
                 cache_put(url, cookies, headers, max_chars, out, profile)
@@ -945,6 +1083,7 @@ async def scrape_many(
                             "authenticated": None,
                             "state": "error",
                         },
+                        "reasons": [{"state": "error", "method": "http", "detail": str(e)}],
                     }
                 except Exception as e:  # noqa: BLE001 - record reason, ladder continues
                     return url, await record(url, "http", exc=e)
@@ -1047,10 +1186,7 @@ async def scrape_many(
             "attempts": attempts[url],
             "error": detail,
             "auth": auth,
-            "reasons": [
-                {"state": s, "method": m, "detail": d}
-                for s, m, d in reasons[url]
-            ],
+            "reasons": [{"state": s, "method": m, "detail": d} for s, m, d in reasons[url]],
         }
     return results
 

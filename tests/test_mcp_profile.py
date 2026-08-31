@@ -156,7 +156,9 @@ def test_mcp_fetch_enriched_output_present(tmp_path):
         assert '"auth"' in ok_text
         assert '"authenticated":true' in ok_text
         assert '"attempts"' in ok_text
-        assert '"reasons"' not in ok_text, "success should not have reasons"
+        # Success carries an empty reasons list (consistent shape: consumers
+        # can always iterate reasons without a None check).
+        assert '"reasons":[]' in ok_text, "success should have empty reasons"
 
         # Anonymous (blocked): must have provenance fields
         assert '"status":"blocked"' in anon_text or '"status":"login_required"' in anon_text
