@@ -962,6 +962,10 @@ async def scrape_many(
             "attempts": attempts[url],
             "error": detail,
             "auth": auth,
+            "reasons": [
+                {"state": s, "method": m, "detail": d}
+                for s, m, d in reasons[url]
+            ],
         }
     return results
 

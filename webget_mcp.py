@@ -229,6 +229,9 @@ async def search_fetch(
                 "method": got.get("method", ""),
                 "cached": got.get("cached", False),
                 "error": got.get("error"),
+                "auth": got.get("auth"),
+                "attempts": got.get("attempts"),
+                "reasons": got.get("reasons"),
             }
         )
     return out
