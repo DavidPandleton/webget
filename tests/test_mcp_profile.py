@@ -43,7 +43,7 @@ def _make_profile(root, name):
             {
                 "cookies": [
                     {
-                        "name": "s",
+                        "name": "session",
                         "value": "1",
                         "domain": "127.0.0.1",
                         "path": "/",

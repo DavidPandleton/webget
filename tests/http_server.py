@@ -202,7 +202,18 @@ class _Handler(BaseHTTPRequestHandler):
 
             # --- cookie-gated page ---
             if path == "/cookie-gated":
-                if self.headers.get("Cookie"):
+                # Gate on a NAMED session cookie, not mere Cookie-header
+                # presence: crawl4ai's browser path injects a
+                # "cookiesEnabled=true" cookie into every request (anti-
+                # cookie-banner heuristic), so presence-based gating is
+                # defeated by the browser and a 403 surfaces as success.
+                # Real sites gate on a named session cookie; mirror that.
+                cookies = {
+                    p.split("=", 1)[0].strip()
+                    for p in (self.headers.get("Cookie") or "").split(";")
+                    if "=" in p
+                }
+                if "sid" in cookies or "session" in cookies or "webget_session" in cookies:
                     self._page(title="Secret", body="you are authenticated " + LONG_BODY)
                 else:
                     self._send(403, b"Forbidden")
