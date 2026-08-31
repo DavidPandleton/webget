@@ -260,6 +260,16 @@ def _extract_markdown(html):
 # Guards against memory exhaustion from giant/binary downloads.
 MAX_RESPONSE_BYTES = 25 * 1024 * 1024
 
+
+class ResponseTooLarge(Exception):
+    """HTTP response exceeded MAX_RESPONSE_BYTES.
+
+    Raised by the streaming cap in fetch_http. This is a TERMINAL state
+    for the ladder: retrying a 30MB page in a browser (crawl4ai) would
+    just re-download the same giant body through Chromium, so escalating
+    is pure waste. scrape_many treats it as terminal, not a ladder step.
+    """
+
 # Default cap on concurrent fetches per ladder pass. Unbounded gather on a
 # 500-URL batch would open 500 connections (and later 500 browser pages).
 _DEFAULT_CONCURRENCY = 10
@@ -331,7 +341,7 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
                 async for chunk in r.aiter_bytes():
                     total += len(chunk)
                     if total > MAX_RESPONSE_BYTES:
-                        raise RuntimeError(f"response too large (> {MAX_RESPONSE_BYTES} bytes)")
+                        raise ResponseTooLarge(f"response too large (> {MAX_RESPONSE_BYTES} bytes)")
                     chunks.append(chunk)
                 html = b"".join(chunks).decode("utf-8", errors="replace")
                 title = ""
@@ -832,6 +842,25 @@ async def scrape_many(
                     return url, await record(url, "http", res=res)
                 except TimeoutError:
                     return url, await record(url, "http", exc=TimeoutError("timeout"))
+                except ResponseTooLarge as e:
+                    # TERMINAL: the body exceeded MAX_RESPONSE_BYTES. A browser
+                    # pass would re-download the same giant body through
+                    # Chromium, so escalating is pure waste. Report it as a
+                    # final error and drop the URL from the ladder.
+                    return url, {
+                        "title": "",
+                        "markdown": "",
+                        "status": "error",
+                        "method": "http",
+                        "cached": False,
+                        "attempts": 1,
+                        "error": str(e),
+                        "auth": {
+                            "profile": profile,
+                            "authenticated": None,
+                            "state": "error",
+                        },
+                    }
                 except Exception as e:  # noqa: BLE001 - record reason, ladder continues
                     return url, await record(url, "http", exc=e)
 
