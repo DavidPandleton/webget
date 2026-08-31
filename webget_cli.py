@@ -549,8 +549,8 @@ async def _guard_browser_routes(crawler_ctx):
     """
     try:
         bm = crawler_ctx.crawler_strategy.browser_manager
-        browser = bm.default_context if bm else None
-        if browser is None or not hasattr(browser, "on"):
+        target = bm.default_context if bm else None
+        if target is None:
             return
     except Exception:  # noqa: BLE001 - guard is best-effort; pre-check still applies
         return
@@ -614,10 +614,19 @@ async def _guard_browser_routes(crawler_ctx):
         except Exception:  # noqa: BLE001, S110 - context closing; skip
             pass
 
-    for ctx in list(browser.contexts):
-        await register(ctx)
-    # Crawl4AI may create the crawling context lazily on first navigation.
-    browser.on("context", lambda ctx: asyncio.create_task(register(ctx)))
+    # crawler_strategy.browser_manager.default_context is a Playwright
+    # Browser in some Crawl4AI versions and an already-created
+    # BrowserContext in others (seen on the profile/session path, where
+    # the manager builds its context up front). Handle both: a Browser
+    # gets routes on every existing context plus a hook for lazily
+    # created ones; a single BrowserContext is registered directly.
+    if hasattr(target, "contexts"):
+        for ctx in list(target.contexts):
+            await register(ctx)
+        # Crawl4AI may create the crawling context lazily on first navigation.
+        target.on("context", lambda ctx: asyncio.create_task(register(ctx)))
+    else:
+        await register(target)
 
 
 def _profile_root():
@@ -883,6 +892,14 @@ async def _crawl4ai_once(crawler, cfg, url, per_url_timeout):
 
     try:
         r = await attempt()
+        # NOTE: crawl4ai's browser manager seeds every context with a
+        # "cookiesEnabled=true" cookie (anti-cookie-banner heuristic), so
+        # endpoints that gate on ANY cookie presence look authenticated to
+        # the browser path. r.status_code is the container's view (rewound
+        # to 200 on success); there is no events API for the true nav
+        # status, so auth classification leans on content markers via
+        # _auth_state. Real sites gate on a named session cookie, which
+        # the injected one does not satisfy.
         return {
             "title": (r.metadata or {}).get("title", ""),
             "markdown": (r.markdown or ""),

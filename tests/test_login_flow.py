@@ -133,7 +133,7 @@ def test_mcp_login_tool_persists_and_fetch_uses_it(server, tmp_path):
 
     res, authed, anon = asyncio.run(asyncio.wait_for(run(), timeout=90))
     res_text = res.content[0].text if res.content else ""
-    assert not res.isError, res_text
+    assert not res.is_error, res_text
     assert '"status":"success"' in res_text, res_text
     assert '"profile":"mcplogin"' in res_text
 
