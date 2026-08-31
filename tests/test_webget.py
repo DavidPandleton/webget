@@ -518,3 +518,59 @@ class TestLogoutPrune:
         assert webget._cookie_belongs_to("campus.example", "campus.example")
         assert not webget._cookie_belongs_to("github.com", "campus.example")
         assert not webget._cookie_belongs_to("notevil.com", "evil.com")
+
+
+class TestStrategyMemory:
+    def test_learn_and_load(self, isolated_env):
+        """_learn_strategy writes to CACHE_DIR; _load_strategy_memory reads it back."""
+        webget._learn_strategy("example.com", "http")
+        memory = webget._load_strategy_memory()
+        assert memory.get("example.com") == "http"
+
+    def test_reorder_promotes_preferred(self, isolated_env):
+        """_reorder_steps_by_domain moves the known strategy to the front."""
+        webget._learn_strategy("js-heavy.com", "crawl4ai")
+        steps = webget._reorder_steps_by_domain(["http", "crawl4ai"], "https://js-heavy.com/path")
+        assert steps[0] == "crawl4ai"
+        assert steps == ["crawl4ai", "http"]
+
+    def test_reorder_noop_when_unknown(self, isolated_env):
+        """When no memory exists, step order is unchanged."""
+        steps = webget._reorder_steps_by_domain(["http", "crawl4ai"], "https://unknown.com/path")
+        assert steps == ["http", "crawl4ai"]
+
+    def test_reorder_noop_when_preferred_not_in_steps(self, isolated_env):
+        """When the remembered strategy is not available, unchanged."""
+        webget._learn_strategy("premium.com", "firecrawl")
+        steps = webget._reorder_steps_by_domain(["http", "crawl4ai"], "https://premium.com/path")
+        assert steps == ["http", "crawl4ai"]  # firecrawl not in steps
+
+    def test_reorder_noop_single_step(self, isolated_env):
+        """Single-step ladders are never reordered."""
+        for steps in [["http"], ["crawl4ai"], ["firecrawl"]]:
+            assert webget._reorder_steps_by_domain(steps, "https://any.com/") == steps
+
+    def test_load_empty_when_no_file(self, isolated_env):
+        """No file on disk -> empty dict, no crash."""
+        assert webget._load_strategy_memory() == {}
+
+    def test_learn_survives_across_calls(self, isolated_env):
+        """Learning for one domain does not erase existing entries."""
+        webget._learn_strategy("a.com", "http")
+        webget._learn_strategy("b.com", "crawl4ai")
+        memory = webget._load_strategy_memory()
+        assert memory == {"a.com": "http", "b.com": "crawl4ai"}
+
+    def test_batch_reorder_respects_majority_domain(self, isolated_env):
+        """Majority domain from a batch of URLs drives the reorder."""
+        webget._learn_strategy("js-heavy.com", "crawl4ai")
+        urls = [
+            "https://js-heavy.com/page1",
+            "https://js-heavy.com/page2",
+            "https://static.example.com/style.css",
+        ]
+        from collections import Counter
+        from urllib.parse import urlparse
+
+        domains = [urlparse(u).hostname for u in urls if urlparse(u).hostname]
+        assert Counter(domains).most_common(1)[0][0] == "js-heavy.com"

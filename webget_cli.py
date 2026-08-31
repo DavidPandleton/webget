@@ -676,6 +676,67 @@ def _ladder(strategy, key):
     return steps
 
 
+def _strategy_memory_path():
+    return os.path.join(CACHE_DIR, "strategy_memory.json")
+
+
+def _load_strategy_memory():
+    p = _strategy_memory_path()
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_strategy_memory(memory):
+    p = _strategy_memory_path()
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(p), prefix="strategy_memory.", suffix=".tmp")
+        with os.fdopen(fd, "w") as f:
+            json.dump(memory, f)
+        os.replace(tmp, p)
+    except OSError:
+        pass  # best-effort
+
+
+def _learn_strategy(domain, method):
+    """Record that `method` succeeded for `domain`.
+
+    Called after each successful fetch so future 'auto' ladder runs
+    can try the known-good strategy first, skipping steps that are
+    likely to fail (e.g. HTTP for a JS-heavy single-page app).
+    Only writes when the value actually changes.
+    """
+    memory = _load_strategy_memory()
+    if memory.get(domain) == method:
+        return
+    memory[domain] = method
+    _save_strategy_memory(memory)
+
+
+def _reorder_steps_by_domain(steps, url):
+    """Reorder ladder steps so the domain's preferred strategy comes first.
+
+    When strategy='auto' and we have a memory of past success for this
+    domain, promote that method to the front so the ladder skips likely
+    failures. Unchanged when memory is empty or strategy is explicit.
+    """
+    if len(steps) <= 1:
+        return steps
+    from urllib.parse import urlparse
+
+    domain = urlparse(url).hostname or ""
+    if not domain:
+        return steps
+    memory = _load_strategy_memory()
+    preferred = memory.get(domain)
+    if not preferred or preferred not in steps:
+        return steps
+    return [preferred] + [s for s in steps if s != preferred]
+
+
 def _normalize_hit(hit):
     return {
         "title": hit.get("title", ""),
@@ -752,6 +813,17 @@ async def scrape_many(
     max_concurrency=None,
 ):
     steps = _ladder(strategy, firecrawl_key())
+    # Per-domain strategy memory: when strategy is "auto" and we have
+    # past success data for the batch's majority domain, reorder steps
+    # so the known-good strategy is tried first, skipping likely failures.
+    if strategy == "auto" and urls:
+        from collections import Counter
+        from urllib.parse import urlparse
+
+        domains = [urlparse(u).hostname for u in urls if urlparse(u).hostname]
+        if domains:
+            majority = Counter(domains).most_common(1)[0][0]
+            steps = _reorder_steps_by_domain(steps, f"https://{majority}/")
     results = {}
     missing = []
     # Deduplicate: identical URLs must not cause duplicate work or races.
@@ -797,6 +869,12 @@ async def scrape_many(
         state, authenticated = _auth_state(res, profile)
         if state == "success" and len((res.get("markdown") or "").strip()) >= 100:
             auth = {"profile": profile, "authenticated": authenticated, "state": state}
+            # Record which strategy won for this domain so future 'auto'
+            # batches can try it first (per-domain strategy memory).
+            from urllib.parse import urlparse
+            domain = urlparse(url).hostname
+            if domain:
+                _learn_strategy(domain, method)
             out = {
                 "title": res.get("title", ""),
                 "markdown": res.get("markdown", ""),
