@@ -574,3 +574,35 @@ class TestStrategyMemory:
 
         domains = [urlparse(u).hostname for u in urls if urlparse(u).hostname]
         assert Counter(domains).most_common(1)[0][0] == "js-heavy.com"
+
+
+class TestLoginFlowErrorHandling:
+    """Error handling in _login_flow when playwright is not installed."""
+
+    def test_login_flow_friendly_error_no_playwright(self, monkeypatch):
+        """When playwright is missing, _login_flow raises RuntimeError with a
+        helpful message, not a bare ImportError that MCP shows as
+        'No module named playwright'."""
+        import builtins
+
+        import pytest
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *a, **kw):
+            if name == "playwright.async_api" or name.startswith("playwright"):
+                raise ImportError("No module named 'playwright'")
+            return real_import(name, *a, **kw)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        with pytest.raises(RuntimeError) as exc:
+            import asyncio
+
+            asyncio.run(
+                webget._login_flow(
+                    "https://example.com", "test", headless=True, interactive=False, quiet=True
+                )
+            )
+        msg = str(exc.value)
+        assert "playwright" in msg.lower()
+        assert "install" in msg.lower()

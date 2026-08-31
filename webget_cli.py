@@ -1241,7 +1241,14 @@ async def _login_flow(
     the login handshake) or wait_seconds elapses, then persist.
     quiet=True (MCP): status lines go to stderr; stdout belongs to FastMCP.
     """
-    from playwright.async_api import async_playwright
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        raise RuntimeError(
+            "login requires playwright (not installed). Install with: "
+            "uv tool install webget-cli --with webget-cli[browser] "
+            "&& playwright install chromium"
+        ) from None
 
     state_p = profile_state_path(profile)
     os.makedirs(profile_dir(profile), exist_ok=True)
