@@ -53,7 +53,7 @@ def test_invalid_strategy_returns_error_not_crash():
             return res
 
     res = _run(run())
-    assert not res.isError
+    assert not res.is_error
     assert "error" in res.content[0].text
 
 
@@ -72,7 +72,7 @@ def test_firecrawl_without_key_returns_error_not_crash():
             return res
 
     res = _run(run())
-    assert not res.isError
+    assert not res.is_error
     assert "error" in res.content[0].text
 
 
@@ -95,7 +95,7 @@ def test_server_stays_alive_after_bad_calls():
             return res
 
     res = _run(run())
-    assert not res.isError
+    assert not res.is_error
     assert "success" in res.content[0].text
 
 
@@ -118,7 +118,7 @@ def test_fetch_invalid_profile_returns_error_not_crash():
             return res, ok
 
     res, ok = _run(run())
-    assert not res.isError
+    assert not res.is_error
     assert "invalid profile name" in res.content[0].text
     assert "success" in ok.content[0].text  # server alive after the bad call
 
@@ -139,7 +139,7 @@ def test_fetch_nonexistent_profile_returns_error():
             return res
 
     res = _run(run())
-    assert not res.isError
+    assert not res.is_error
     assert "profile 'ghost' not found" in res.content[0].text
 
 
@@ -161,9 +161,9 @@ def test_search_fetch_invalid_profile_returns_error_not_crash():
             return res, ok
 
     res, ok = _run(run())
-    assert not res.isError
+    assert not res.is_error
     assert "invalid profile name" in res.content[0].text
-    assert not ok.isError  # server alive after the bad call
+    assert not ok.is_error  # server alive after the bad call
 
 
 def test_list_profiles_tool_metadata_only(tmp_path):
@@ -189,7 +189,7 @@ def test_list_profiles_tool_metadata_only(tmp_path):
             return res
 
     res = _run(run())
-    assert not res.isError
+    assert not res.is_error
     text = res.content[0].text
     assert "sion" in text
     assert "SUPERSECRET" not in text  # cookie values never exposed
