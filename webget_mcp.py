@@ -117,14 +117,13 @@ async def login(
         wg.profile_dir(profile)  # raises SystemExit on invalid names
     except SystemExit as e:
         return {"status": "error", "error": str(e)}
-    await asyncio.to_thread(
-        lambda: asyncio.run(
-            wg._login_flow(
-                url, profile, headless, wait_seconds=wait_seconds,
-                interactive=False, quiet=True,
-            )
+    try:
+        await wg._login_flow(
+            url, profile, headless, wait_seconds=wait_seconds,
+            interactive=False, quiet=True,
         )
-    )
+    except SystemExit as e:
+        return {"status": "error", "error": str(e)}
     return {
         "status": "success",
         "profile": profile,

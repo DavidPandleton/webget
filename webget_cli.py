@@ -1124,9 +1124,9 @@ async def _login_flow(
     """Login flow for a profile: open browser, user logs in, session persists.
 
     interactive=True (CLI): waits for Enter on stdin, exactly like before.
-    interactive=False (MCP): stdin is the JSON-RPC stream — a blocking
-    input() would swallow protocol bytes, so instead we poll the browser
-    context until session cookies appear (the Set-Cookie side effect of
+    interactive=False (MCP): stdin is the JSON-RPC stream, so a blocking
+    input() would swallow protocol bytes. Instead we poll the browser
+    context until a session cookie appears (the Set-Cookie side effect of
     the login handshake) or wait_seconds elapses, then persist.
     quiet=True (MCP): status lines go to stderr; stdout belongs to FastMCP.
     """
@@ -1171,18 +1171,25 @@ async def _login_flow(
 
 
 async def _wait_for_session_cookies(context, wait_seconds):
-    """Poll the live browser context until it holds any cookie.
+    """Poll the live browser context until a session cookie appears.
 
     Used by non-interactive login (MCP tool): there is no Enter keypress on
     the JSON-RPC stdin, so instead we watch for the login handshake's
-    Set-Cookie side effect. Returns as soon as cookies appear or after
-    wait_seconds, whichever is first.
+    Set-Cookie side effect. We specifically look for a session cookie (no
+    Expires/Max-Age attribute) so we don't exit early on incidental
+    third-party trackers or pre-existing cookies that load with the page.
+    Returns as soon as a session cookie appears, or after wait_seconds
+    (in which case we persist anyway as a best-effort fallback).
     """
     deadline = time.monotonic() + max(0, wait_seconds)
     while time.monotonic() < deadline:
         try:
-            if await context.cookies():
-                return
+            cookies = await context.cookies()
+            for c in cookies:
+                # Session cookies have expires == -1 (or the field absent).
+                # Persistent cookies carry a positive epoch timestamp.
+                if c.get("expires", -1) <= 0:
+                    return
         except Exception:  # noqa: BLE001, S110 - context mid-navigation; keep polling
             pass
         await asyncio.sleep(1)

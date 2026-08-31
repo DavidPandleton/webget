@@ -32,7 +32,9 @@ jobs:
         # MCP tests need the mcp SDK: run in the dedicated mcp-test job.
         # test_adversarial_mcp.py / test_mcp_leak_review.py / test_mcp_profile.py
         # also import mcp at collection time, so they are scoped out here too.
-        run: pytest --ignore=tests/test_mcp_server.py --ignore=tests/test_mcp_smoke.py --ignore=tests/test_adversarial_mcp.py --ignore=tests/test_mcp_leak_review.py --ignore=tests/test_mcp_profile.py
+        # test_login_flow.py also imports mcp (for the stdio client), so it
+        # runs in mcp-test; that job installs playwright for the browser path.
+        run: pytest --ignore=tests/test_mcp_server.py --ignore=tests/test_mcp_smoke.py --ignore=tests/test_adversarial_mcp.py --ignore=tests/test_mcp_leak_review.py --ignore=tests/test_mcp_profile.py --ignore=tests/test_login_flow.py --ignore=tests/test_browser_ssrf.py
 
   mcp-test:
     runs-on: ubuntu-latest
@@ -42,13 +44,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install with MCP extra
+      - name: Install with MCP extra + playwright
+        # test_login_flow.py exercises a real Chromium via playwright AND
+        # the MCP stdio client, so this job owns both deps.
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[mcp]"
-          pip install pytest
-      - name: MCP server tests
-        run: pytest tests/test_mcp_server.py tests/test_mcp_smoke.py tests/test_adversarial_mcp.py tests/test_mcp_leak_review.py tests/test_mcp_profile.py -q
+          pip install pytest playwright
+          python -m playwright install chromium --with-deps
+      - name: MCP + browser login flow tests
+        run: pytest tests/test_mcp_server.py tests/test_mcp_smoke.py tests/test_adversarial_mcp.py tests/test_mcp_leak_review.py tests/test_mcp_profile.py tests/test_login_flow.py -q
 
   smoke:
     runs-on: ubuntu-latest
