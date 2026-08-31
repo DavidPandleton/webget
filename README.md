@@ -213,7 +213,7 @@ standalone with `webget-mcp` (stdio transport) or `python webget_mcp.py`.
 ### Authenticated sessions (profiles)
 
 MCP tools can use locally stored login sessions. Create one first with the
-CLI:
+CLI, or let the agent create it via the MCP `login` tool:
 
 ```bash
 webget login https://portal.example.com --profile portal
@@ -223,13 +223,19 @@ Then the agent can discover sessions and fetch authenticated pages:
 
 - `list_profiles` - lists available sessions (name, last used, size,
   status). Cookie values are never returned.
+- `login(url, profile)` - opens a browser session (headful by default so a
+  human can log in), navigates to `url`, and persists the session once the
+  login handshake's cookies appear (or after `wait_seconds`, whichever
+  comes first). MCP stdin is the JSON-RPC stream, so there is no Enter
+  keypress; the flow polls for cookies instead.
 - `fetch(..., profile="portal")` / `search_fetch(..., profile="portal")` -
   scrape using that session.
 
 ```text
 agent: "check my portal for new announcements"
   1. list_profiles            -> portal (authenticated)
-  2. fetch(url, profile="portal")
+  2. login(https://portal.example.com, profile="portal")  # if not listed
+  3. fetch(url, profile="portal")
 ```
 
 Invalid profile names and unknown profiles are hard errors (no silent

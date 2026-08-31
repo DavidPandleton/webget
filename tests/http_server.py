@@ -130,6 +130,17 @@ class _Handler(BaseHTTPRequestHandler):
                 return
 
             # --- auth states ---
+            if path == "/set-cookie":
+                # Sets a session cookie (login handshake side effect), then
+                # serves a normal page. Used to exercise the non-interactive
+                # login flow's cookie polling.
+                self._page(
+                    200,
+                    title="Session set",
+                    body="you are authenticated " + LONG_BODY,
+                    headers={"Set-Cookie": "webget_session=1; Path=/"},
+                )
+                return
             if path == "/login":
                 self._page(
                     200,
