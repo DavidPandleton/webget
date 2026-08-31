@@ -1,6 +1,7 @@
 """Adversarial HTTP tests: URL handling, status codes, redirects, bodies."""
 
 import asyncio
+import time
 
 import pytest
 
@@ -62,6 +63,26 @@ class TestConnectionFailures:
         server = fresh_cache
         res = asyncio.run(_fetch(server.url("/timeout?sec=5"), per_url_timeout=1))
         assert _one(res)["status"] == "error"
+
+    def test_slow_drip_hits_wall_clock_deadline(self, fresh_cache):
+        """A server that slow-drips the body must not exceed per_url_timeout.
+
+        httpx's own timeout bounds a single socket operation only, so a
+        drip of small chunks every 150ms (total ~6s for 40 chunks) would
+        keep the request alive far past a 2s budget. fetch_http enforces
+        an absolute deadline while streaming; this proves the URL errors
+        out in roughly the budget, not the full drip duration.
+        """
+        server = fresh_cache
+        t0 = time.monotonic()
+        res = asyncio.run(
+            _fetch(server.url("/drip?n=40&delay=0.15"), per_url_timeout=2, strategy="http")
+        )
+        elapsed = time.monotonic() - t0
+        out = _one(res)
+        assert out["status"] == "error"
+        # Drip would take ~6s uncapped; deadline must cut it near 2s.
+        assert elapsed < 4.0, f"deadline not enforced: took {elapsed:.1f}s"
 
 
 # ---------- status codes ----------

@@ -335,10 +335,17 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
                 if "html" not in ctype and "text" not in ctype:
                     raise RuntimeError(f"not HTML ({ctype or 'unknown'})")
                 # Read with a hard cap while streaming, so a giant/binary
-                # body cannot exhaust memory.
+                # body cannot exhaust memory. httpx's timeout bounds a
+                # single socket operation only, so a server that slow-drips
+                # the body in small chunks over minutes can keep it alive
+                # far past the deadline; enforce an absolute wall-clock cap
+                # here so one slow URL cannot stall the whole batch.
+                deadline = time.monotonic() + timeout
                 chunks = []
                 total = 0
                 async for chunk in r.aiter_bytes():
+                    if time.monotonic() > deadline:
+                        raise TimeoutError(f"streaming body exceeded {timeout}s deadline")
                     total += len(chunk)
                     if total > MAX_RESPONSE_BYTES:
                         raise ResponseTooLarge(f"response too large (> {MAX_RESPONSE_BYTES} bytes)")

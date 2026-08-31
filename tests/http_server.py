@@ -111,6 +111,27 @@ class _Handler(BaseHTTPRequestHandler):
                 time.sleep(float(q.get("sec", "10")))
                 self._page(title="Too late", body="should not be seen")
                 return
+            if path == "/drip":
+                # Slow-drip: stream the body in small chunks with sleeps in
+                # between, so the TOTAL transfer far exceeds any per-socket
+                # timeout. A client that only bounds a single socket op
+                # (httpx default) would sit here for the full duration; the
+                # wall-clock deadline in fetch_http must cut it short.
+                chunk = b"<html><body>drip </body></html>"
+                n = int(q.get("n", "40"))
+                body = chunk * n
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    for _ in range(n):
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                        time.sleep(float(q.get("delay", "0.15")))
+                except (BrokenPipeError, ConnectionResetError):
+                    return  # client gave up on us; that is the point
+                return
 
             # --- normal content ---
             if path == "/":
