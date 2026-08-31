@@ -109,6 +109,66 @@ def test_mcp_fetch_unknown_profile_is_hard_error(tmp_path):
     assert "profile 'ghost' not found" in res.content[0].text
 
 
+def test_mcp_fetch_enriched_output_present(tmp_path):
+    """MCP fetch must include auth, attempts, and reasons in the response.
+
+    These fields give agents full provenance: whether the fetch used a
+    session, how many ladder steps were tried, and the full chain of
+    failures. Added 2026-08-31.
+    """
+    server = TestServer().start()
+    try:
+        root = tmp_path / "profiles"
+        _make_profile(root, "testp")
+        gated = server.url("/cookie-gated")
+
+        async def run():
+            async with (
+                stdio_client(_spawn(root)) as (read, write),
+                ClientSession(read, write) as session,
+            ):
+                await session.initialize()
+                # Authenticated fetch
+                ok = await session.call_tool(
+                    "fetch",
+                    {
+                        "url": gated,
+                        "strategy": "http",
+                        "no_cache": True,
+                        "profile": "testp",
+                    },
+                )
+                # Anonymous fetch (blocked)
+                anon = await session.call_tool(
+                    "fetch",
+                    {"url": gated, "strategy": "http", "no_cache": True},
+                )
+                return ok, anon
+
+        ok, anon = asyncio.run(asyncio.wait_for(run(), timeout=60))
+        ok_text = ok.content[0].text if ok.content else ""
+        anon_text = anon.content[0].text if anon.content else ""
+
+        # Authenticated: standard assertions
+        assert not ok.isError, ok_text
+        assert '"status":"success"' in ok_text
+        # auth
+        assert '"auth"' in ok_text
+        assert '"authenticated":true' in ok_text
+        assert '"attempts"' in ok_text
+        assert '"reasons"' not in ok_text, "success should not have reasons"
+
+        # Anonymous (blocked): must have provenance fields
+        assert '"status":"blocked"' in anon_text or '"status":"login_required"' in anon_text
+        assert '"auth"' in anon_text
+        assert '"authenticated":false' in anon_text or '"authenticated":null' in anon_text
+        assert '"attempts"' in anon_text
+        assert '"reasons"' in anon_text
+        assert '"state":"blocked"' in anon_text or '"state":"login_required"' in anon_text
+    finally:
+        server.stop()
+
+
 if __name__ == "__main__":
     import pytest
 
