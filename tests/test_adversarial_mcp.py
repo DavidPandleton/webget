@@ -58,7 +58,7 @@ class TestMalformedArguments:
                 return res
 
         res = _run(run())
-        assert res.is_error
+        assert res.isError
 
 
 class TestInvalidURLs:
@@ -72,7 +72,7 @@ class TestInvalidURLs:
                 return res
 
         res = _run(run())
-        assert "error" in res.content[0].text or res.is_error
+        assert "error" in res.content[0].text or res.isError
 
 
 class TestRepeatedCalls:
@@ -86,7 +86,7 @@ class TestRepeatedCalls:
                         "fetch",
                         {"url": "https://example.com", "strategy": "http", "no_cache": True},
                     )
-                    if res.is_error:
+                    if res.isError:
                         return "ERROR"
                 return "OK"
 
@@ -106,7 +106,7 @@ class TestRepeatedCalls:
                         for _ in range(5)
                     ]
                 )
-                return [r.is_error for r in results]
+                return [r.isError for r in results]
 
         assert _run(run()) == [False] * 5
 
@@ -133,7 +133,7 @@ class TestInputCaps:
                 return res
 
         res = _run(run())
-        assert "must be between" in res.content[0].text or res.is_error
+        assert "must be between" in res.content[0].text or res.isError
 
 
 class TestToolFailureIsolation:

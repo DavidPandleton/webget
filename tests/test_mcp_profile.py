@@ -79,7 +79,7 @@ def test_mcp_fetch_with_profile_uses_session(tmp_path):
         ok, anon = asyncio.run(asyncio.wait_for(run(), timeout=60))
         ok_text = ok.content[0].text if ok.content else ""
         anon_text = anon.content[0].text if anon.content else ""
-        assert not ok.is_error, ok_text
+        assert not ok.isError, ok_text
         assert '"status":"success"' in ok_text, ok_text
         assert "you are authenticated" in ok_text, ok_text
         assert '"authenticated":true' in ok_text, ok_text  # session was used
@@ -105,7 +105,7 @@ def test_mcp_fetch_unknown_profile_is_hard_error(tmp_path):
             return res
 
     res = asyncio.run(asyncio.wait_for(run(), timeout=60))
-    assert not res.is_error
+    assert not res.isError
     assert "profile 'ghost' not found" in res.content[0].text
 
 
@@ -150,7 +150,7 @@ def test_mcp_fetch_enriched_output_present(tmp_path):
         anon_text = anon.content[0].text if anon.content else ""
 
         # Authenticated: standard assertions
-        assert not ok.is_error, ok_text
+        assert not ok.isError, ok_text
         assert '"status":"success"' in ok_text
         # auth
         assert '"auth"' in ok_text

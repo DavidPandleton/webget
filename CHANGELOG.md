@@ -5,6 +5,19 @@ All notable changes to webget are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-01
+
+### Changed
+- Internal: split `webget_cli.py` (1762 lines) into a `webget/` package
+  with focused sub-modules (`cache`, `ssrf`, `profile`, `http`,
+  `firecrawl`, `search`, `ladder`, `cli`). `webget_cli.py` is kept as a
+  ~50-line backwards-compatible shim that re-exports the public API, so
+  `import webget_cli as webget` and the full test fixture (`monkeypatch
+  .setattr(webget, ...)`) keep working unchanged. Entry point migrated
+  to `webget.cli:main`.
+
+## [0.9.0] - 2026-09-01
+
 ### Added
 - MCP server: `login` tool opens a browser session for a profile, navigates
   to a URL, and persists the session without blocking on stdin (the MCP

@@ -64,7 +64,7 @@ class TestNoSecretLeakage:
                 return res
 
         res = _run(run())
-        if res.is_error:
+        if res.isError:
             return  # error path: no payload to leak, still fine
         text = res.content[0].text
         hits = _scan(text)
@@ -121,7 +121,7 @@ class TestServerRecovery:
                 bad = await session.call_tool(
                     "fetch", {"url": "https://example.com", "strategy": "bogus"}
                 )
-                assert not bad.is_error or "error" in bad.content[0].text
+                assert not bad.isError or "error" in bad.content[0].text
                 good = await session.call_tool(
                     "fetch", {"url": "https://example.com", "strategy": "http", "no_cache": True}
                 )

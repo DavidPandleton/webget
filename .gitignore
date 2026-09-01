@@ -26,6 +26,10 @@ profiles/
 # Agent working files (plan mode, internal only)
 .hermes/plans/
 
+# Research data (Tranco 10k crawl results, etc.)
+data/
+run_tranco_crawl.py
+
 # Editor / OS
 .DS_Store
 *.swp
