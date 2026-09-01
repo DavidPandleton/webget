@@ -39,11 +39,12 @@ mcp = ["fastmcp>=2"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
-webget = "webget_cli:main"
+webget = "webget.cli:main"
 webget-mcp = "webget_mcp:main"
 
 [tool.setuptools]
 py-modules = ["webget_cli", "webget_mcp"]
+packages = ["webget"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
