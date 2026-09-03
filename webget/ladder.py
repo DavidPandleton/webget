@@ -5,6 +5,7 @@ is recorded with reasons and the ladder escalates. Per-domain strategy
 memory promotes a known-good strategy to the front of the ladder so
 subsequent 'auto' runs skip likely-failures.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -316,6 +317,7 @@ async def scrape_many(
     profile=None,
     no_cache=False,
     max_concurrency=None,
+    retry_transient=False,
 ):
     steps = _ladder(strategy, _firecrawl_module.firecrawl_key())
     # Per-domain strategy memory: when strategy is "auto" and we have
@@ -478,6 +480,39 @@ async def scrape_many(
                 results[url] = out
         pending = [u for u in pending if u not in results]
 
+        # Optional retry pass for transient timeouts on the fast HTTP path
+        if retry_transient and pending and "http" in steps:
+            transient_candidates = [
+                u
+                for u in pending
+                if reasons[u]
+                and reasons[u][-1][0] == "error"
+                and "timeout" in str(reasons[u][-1][2]).lower()
+            ]
+            if transient_candidates:
+                retry_timeout = int(per_url_timeout * 1.5)
+
+                async def http_retry_one(u):
+                    async with sem:
+                        try:
+                            res = await _resolve_fetch_http()(
+                                u,
+                                max_chars,
+                                _effective_cookies(cookies, profile),
+                                headers,
+                                timeout=retry_timeout,
+                            )
+                            return u, await record(u, "http", res=res)
+                        except Exception as e:  # noqa: BLE001
+                            return u, await record(u, "http", exc=e)
+
+                for url, out in await asyncio.gather(
+                    *(http_retry_one(u) for u in transient_candidates)
+                ):
+                    if out:
+                        results[url] = out
+                pending = [u for u in pending if u not in results]
+
     # Pass 2: Crawl4AI browser - only launched if something still needs it.
     if pending and "crawl4ai" in steps:
         try:
@@ -507,7 +542,9 @@ async def scrape_many(
                     async def crawl_one(url):
                         async with sem:
                             try:
-                                res = await _resolve_crawl4ai_once()(crawler_ctx, cfg, url, per_url_timeout)
+                                res = await _resolve_crawl4ai_once()(
+                                    crawler_ctx, cfg, url, per_url_timeout
+                                )
                                 res["markdown"] = res.get("markdown", "")[:max_chars]
                                 return url, await record(url, "crawl4ai", res=res)
                             except TimeoutError:

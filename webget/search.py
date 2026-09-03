@@ -1,4 +1,5 @@
 """DuckDuckGo search + atomic JSON helpers for webget."""
+
 from __future__ import annotations
 
 import json

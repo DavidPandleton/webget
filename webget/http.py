@@ -5,6 +5,7 @@ following so the SSRF guard runs on every hop, and a streaming body cap
 so a giant/binary download cannot exhaust memory. Extraction tries
 trafilatura first (clean article text), then markdownify as a fallback.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -93,9 +94,7 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
             except ImportError:
                 _fn = None
             resolver = _fn if (_fn is not None and _fn is not _private_ip_for) else _private_ip_for
-            ip = await asyncio.wait_for(
-                asyncio.to_thread(resolver, target), max(remaining, 0.1)
-            )
+            ip = await asyncio.wait_for(asyncio.to_thread(resolver, target), max(remaining, 0.1))
         except TimeoutError:
             raise TimeoutError(f"DNS resolution exceeded {timeout}s") from None
         if ip is not None:

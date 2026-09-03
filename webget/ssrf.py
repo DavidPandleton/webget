@@ -19,6 +19,7 @@ definition and all call sites were in the same module; the package
 layout would otherwise bind the symbol at import time and miss the
 patch.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -45,6 +46,51 @@ def _ip_is_private(ip):
     )
 
 
+def _doh_resolve(host, timeout=3.0):
+    """Fallback DoH resolver (Cloudflare 1.1.1.1 / Google 8.8.8.8) using httpx.
+    Returns list of IP strings if resolvable, else empty list.
+    """
+    if os.environ.get("WEBGET_DISABLE_DOH") == "1":
+        return []
+    import urllib.parse
+
+    import httpx
+
+    urls = [
+        f"https://1.1.1.1/dns-query?name={urllib.parse.quote(host)}&type=A",
+        f"https://dns.google/resolve?name={urllib.parse.quote(host)}&type=A",
+    ]
+    for url in urls:
+        try:
+            with httpx.Client(timeout=timeout, verify=True) as client:
+                res = client.get(url, headers={"accept": "application/dns-json"})
+                if res.status_code == 200:
+                    data = res.json()
+                    answers = data.get("Answer", [])
+                    ips = [
+                        ans.get("data")
+                        for ans in answers
+                        if ans.get("type") == 1 and ans.get("data")
+                    ]
+                    if ips:
+                        return ips
+        except Exception:  # noqa: BLE001, S112 - DoH is best-effort fallback
+            continue
+    return []
+
+
+def _resolve_hostname_ips(host):
+    """Resolve a hostname to a list of IP address strings.
+    Tries system getaddrinfo first; falls back to DoH on DNS resolution errors.
+    """
+    try:
+        infos = socket.getaddrinfo(host, None)
+        return [i[4][0] for i in infos]
+    except OSError:
+        doh_ips = _doh_resolve(host)
+        return doh_ips
+
+
 def _hostname_private(host):
     """Resolve a hostname once and check every address. Cached per process.
 
@@ -55,13 +101,15 @@ def _hostname_private(host):
     """
     if host in _PRIVATE_IP_CACHE:
         return _PRIVATE_IP_CACHE[host]
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except OSError:
+    ips = _resolve_hostname_ips(host)
+    if not ips:
         # DNS failure is not a privacy violation; let the fetch fail normally.
         _PRIVATE_IP_CACHE[host] = False
         return False
-    private = any(_ip_is_private(ipaddress.ip_address(i[4][0])) for i in infos)
+    try:
+        private = any(_ip_is_private(ipaddress.ip_address(ip)) for ip in ips)
+    except ValueError:
+        private = False
     if len(_PRIVATE_IP_CACHE) < 512:
         _PRIVATE_IP_CACHE[host] = private
     return private

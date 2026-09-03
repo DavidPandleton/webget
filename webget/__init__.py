@@ -17,6 +17,7 @@ Sub-modules:
 The legacy single-file import `import webget_cli as webget` keeps
 working via the compatibility shim at ./webget_cli.py.
 """
+
 from __future__ import annotations
 
 from .cache import (
@@ -29,6 +30,7 @@ from .cache import (
     parse_headers,
 )
 from .cli import main, parse_opts
+from .discovery import discover_urls
 from .firecrawl import fetch_firecrawl, firecrawl_key
 from .http import MAX_RESPONSE_BYTES, ResponseTooLarge, _extract_markdown, fetch_http
 from .ladder import (
@@ -78,6 +80,7 @@ from .ssrf import (
     _is_private_target,
     _private_ip_for,
     _request_body_bytes,
+    _resolve_hostname_ips,
 )
 
 # Sorted to satisfy ruff RUF022; module grouping lives in the imports above.
@@ -118,6 +121,7 @@ __all__ = [
     "_read_json",
     "_reorder_steps_by_domain",
     "_request_body_bytes",
+    "_resolve_hostname_ips",
     "_save_strategy_memory",
     "_strategy_memory_path",
     "_terminal_state",
@@ -127,6 +131,7 @@ __all__ = [
     "_write_json",
     "cache_get",
     "cache_put",
+    "discover_urls",
     "fetch_firecrawl",
     "fetch_http",
     "firecrawl_key",

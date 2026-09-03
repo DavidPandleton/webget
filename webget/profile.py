@@ -5,6 +5,7 @@ Profiles live at ~/.local/share/webget/profiles/<name> by default
 (cookies + local storage) so authenticated fetches via the HTTP fast
 path can reuse a session captured once in a real browser.
 """
+
 from __future__ import annotations
 
 import asyncio

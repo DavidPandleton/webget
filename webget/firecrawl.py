@@ -8,6 +8,7 @@ hosts/IPs. webget guarantees only that a private/internal URL is
 never SENT to Firecrawl (pre-check in scrape_many blocks it before the
 ladder runs) and that Firecrawl is strictly opt-in.
 """
+
 from __future__ import annotations
 
 import os

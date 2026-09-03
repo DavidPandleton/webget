@@ -102,7 +102,9 @@ def _spawn_mcp(profile_root):
         "WEBGET_PROFILE_DIR": str(profile_root),
         "WEBGET_ALLOW_PRIVATE": "1",
     }
-    return StdioServerParameters(command=sys.executable, args=[str(ROOT / "webget_mcp.py")], env=env)
+    return StdioServerParameters(
+        command=sys.executable, args=[str(ROOT / "webget_mcp.py")], env=env
+    )
 
 
 def test_mcp_login_tool_persists_and_fetch_uses_it(server, tmp_path):
@@ -117,14 +119,18 @@ def test_mcp_login_tool_persists_and_fetch_uses_it(server, tmp_path):
     gated_url = server.url("/cookie-gated")
 
     async def run():
-        async with stdio_client(_spawn_mcp(root)) as (read, write), ClientSession(read, write) as session:
+        async with (
+            stdio_client(_spawn_mcp(root)) as (read, write),
+            ClientSession(read, write) as session,
+        ):
             await session.initialize()
             res = await session.call_tool(
                 "login",
                 {"url": login_url, "profile": "mcplogin", "headless": True, "wait_seconds": 30},
             )
             authed = await session.call_tool(
-                "fetch", {"url": gated_url, "strategy": "http", "no_cache": True, "profile": "mcplogin"}
+                "fetch",
+                {"url": gated_url, "strategy": "http", "no_cache": True, "profile": "mcplogin"},
             )
             anon = await session.call_tool(
                 "fetch", {"url": gated_url, "strategy": "http", "no_cache": True}
@@ -155,16 +161,21 @@ def test_mcp_login_rejects_bad_url_and_profile(server, tmp_path):
     root = _profile_root(tmp_path)
 
     async def run():
-        async with stdio_client(_spawn_mcp(root)) as (read, write), ClientSession(read, write) as session:
+        async with (
+            stdio_client(_spawn_mcp(root)) as (read, write),
+            ClientSession(read, write) as session,
+        ):
             await session.initialize()
             bad_url = await session.call_tool(
                 "login", {"url": "not a url", "profile": "x", "headless": True, "wait_seconds": 5}
             )
             bad_name = await session.call_tool(
-                "login", {"url": server.url("/"), "profile": "../evil", "headless": True, "wait_seconds": 5}
+                "login",
+                {"url": server.url("/"), "profile": "../evil", "headless": True, "wait_seconds": 5},
             )
             bad_secs = await session.call_tool(
-                "login", {"url": server.url("/"), "profile": "x", "headless": True, "wait_seconds": 1}
+                "login",
+                {"url": server.url("/"), "profile": "x", "headless": True, "wait_seconds": 1},
             )
             return bad_url, bad_name, bad_secs
 

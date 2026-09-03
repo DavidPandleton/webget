@@ -242,6 +242,28 @@ async def search_fetch(
     return out
 
 
+@mcp.tool()
+async def map(
+    url: str,
+    limit: int = 100,
+    timeout: int = 15,
+) -> list[str]:
+    """Discover URLs under a website by probing standard sitemap endpoints and robots.txt.
+    Returns list of discovered URLs bounded by limit.
+    """
+    for name, value, lo, hi in (
+        ("limit", limit, 1, 1000),
+        ("timeout", timeout, 1, _MAX_TIMEOUT),
+    ):
+        err = _clamp(name, value, lo, hi)
+        if err:
+            return [f"error: {err}"]
+    try:
+        return await wg.discover_urls(url, limit=limit, timeout=timeout)
+    except Exception as e:  # noqa: BLE001
+        return [f"error: {e}"]
+
+
 def main() -> None:
     mcp.run()
 

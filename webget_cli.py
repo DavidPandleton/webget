@@ -18,6 +18,7 @@ If you maintain this shim, keep the export set in sync with webget/
 public API; new internal helpers should be exposed here too if tests
 touch them.
 """
+
 from __future__ import annotations
 
 import time
@@ -31,6 +32,15 @@ from webget import *
 # import *`; we re-import it explicitly so `python webget_cli.py` works
 # exactly like before.
 from webget.cli import main
+
+
+def discover_urls(target_url, limit=100, timeout=10, headers=None, allow_private=None):
+    from webget.discovery import discover_urls as _du
+
+    return _du(
+        target_url, limit=limit, timeout=timeout, headers=headers, allow_private=allow_private
+    )
+
 
 __all__ = [
     "CACHE_DIR",

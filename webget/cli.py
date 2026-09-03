@@ -9,6 +9,7 @@ Usage (from --help):
   webget login URL --profile X   Open browser, log in manually, persist session
   webget profiles [--json]       List profiles and session status
   webget logout URL --profile X  Clear auth for one domain, keep the rest
+  webget map URL [--limit N]     Discover URLs via sitemaps and robots.txt
 Aliases: search = s, fetch = u, search-fetch = su
 
 Options:
@@ -34,6 +35,7 @@ Session management:
   webget login never stores passwords and never fills forms. You log in
   yourself in the opened browser window; webget just persists the session.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -56,17 +58,18 @@ from .profile import (
 from .search import search
 
 __doc__ = (
-    'webget - local search + scrape, zero API keys, unlimited usage.\n'
-    'Usage:\n'
+    "webget - local search + scrape, zero API keys, unlimited usage.\n"
+    "Usage:\n"
     '  webget s "query" [n]           Search via DuckDuckGo (default 5)\n'
     '  webget u "https://..."         Scrape URL -> markdown (HTTP fast path, falls back)\n'
     '  webget su "query" [n]          Search + scrape top n results (default 3, parallel)\n'
     '  webget s "q" | webget u -      Pipe: pass URL from search via stdin\n'
-    '                                 (multi-line stdin = batch scrape)\n'
-    '  webget login URL --profile X   Open browser, log in manually, persist session\n'
-    '  webget profiles [--json]       List profiles and session status\n'
-    '  webget logout URL --profile X  Clear auth for one domain, keep the rest\n'
-    'Aliases: search = s, fetch = u, search-fetch = su\n'
+    "                                 (multi-line stdin = batch scrape)\n"
+    "  webget login URL --profile X   Open browser, log in manually, persist session\n"
+    "  webget profiles [--json]       List profiles and session status\n"
+    "  webget logout URL --profile X  Clear auth for one domain, keep the rest\n"
+    "  webget map URL [--limit N]     Discover URLs via sitemaps and robots.txt\n"
+    "Aliases: search = s, fetch = u, search-fetch = su\n"
 )
 
 
@@ -85,6 +88,7 @@ def parse_opts(args):
     no_cache = False
     headless = False
     concurrency = None
+    retry_transient = False
     remaining = []
     i = 0
     while i < len(args):
@@ -97,6 +101,9 @@ def parse_opts(args):
         elif args[i] == "--concurrency" and i + 1 < len(args):
             concurrency = int(args[i + 1])
             i += 2
+        elif args[i] in ("-r", "--retry", "--retry-transient"):
+            retry_transient = True
+            i += 1
         elif args[i] == "--no-cache":
             no_cache = True
             i += 1
@@ -145,6 +152,7 @@ def parse_opts(args):
         no_cache,
         headless,
         concurrency,
+        retry_transient,
     )
 
 
@@ -228,6 +236,7 @@ def main():
         no_cache,
         headless,
         concurrency,
+        retry_transient,
     ) = parse_opts(args)
 
     if concurrency is not None and concurrency < 1:
@@ -260,6 +269,26 @@ def main():
         return
     elif cmd == "logout":
         sys.exit(cmd_logout(q, profile))
+    elif cmd == "map":
+        from .discovery import discover_urls
+
+        n = limit or 100
+        timeout = timeout_override or 10
+        urls = asyncio.run(
+            discover_urls(
+                q,
+                limit=n,
+                timeout=timeout,
+                headers=headers,
+                allow_private=no_cache,
+            )
+        )
+        if json_out:
+            print(json.dumps(urls, indent=2))
+            return
+        for u in urls:
+            print(u)
+        return
 
     if cmd == "s":
         n = limit or (int(args[2]) if len(args) > 2 else 5)
@@ -291,6 +320,7 @@ def main():
                 profile=profile,
                 no_cache=no_cache,
                 max_concurrency=concurrency,
+                retry_transient=retry_transient,
             )
         )
         if json_out:

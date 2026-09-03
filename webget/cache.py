@@ -12,6 +12,7 @@ in the test suite: the canonical location for the path is the shim's
 module attribute, and package sub-modules follow whatever the shim
 currently exposes.
 """
+
 from __future__ import annotations
 
 import hashlib

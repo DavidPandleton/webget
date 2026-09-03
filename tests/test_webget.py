@@ -22,12 +22,21 @@ def auth_state(md="", html="", status=None, profile=None):
 
 class TestParseOpts:
     def test_positional(self):
-        remaining, *_, limit, strategy, profile, no_cache, headless, concurrency = opts(
-            "u", "https://x.com"
-        )
+        (
+            remaining,
+            *_,
+            limit,
+            strategy,
+            profile,
+            no_cache,
+            headless,
+            concurrency,
+            retry_transient,
+        ) = opts("u", "https://x.com")
         assert remaining == ["u", "https://x.com"]
         assert limit is None and strategy == "auto" and profile is None
         assert no_cache is False and headless is False and concurrency is None
+        assert retry_transient is False
 
     def test_cookies_short_and_long(self, tmp_path):
         ck = tmp_path / "ck.txt"
@@ -45,26 +54,30 @@ class TestParseOpts:
         assert mc1 == 500 and mc2 == 500
 
     def test_limit(self):
-        *_, limit, _, _, _, _, _ = opts("s", "q", "--limit", "7")
+        *_, limit, _, _, _, _, _, _ = opts("s", "q", "--limit", "7")
         assert limit == 7
 
     def test_profile_and_no_cache(self):
-        *_, profile, no_cache, _, _ = opts("u", "https://x.com", "--profile", "campus")
+        *_, profile, no_cache, _, _, _ = opts("u", "https://x.com", "--profile", "campus")
         assert profile == "campus" and no_cache is False
-        *_, profile, no_cache, _, _ = opts("u", "https://x.com", "--no-cache")
+        *_, profile, no_cache, _, _, _ = opts("u", "https://x.com", "--no-cache")
         assert profile is None and no_cache is True
 
     def test_strategy(self):
-        *_, strategy, _, _, _, _ = opts("u", "https://x.com", "--strategy", "crawl4ai")
+        *_, strategy, _, _, _, _, _ = opts("u", "https://x.com", "--strategy", "crawl4ai")
         assert strategy == "crawl4ai"
 
     def test_concurrency(self):
-        *_, concurrency = opts("u", "https://x.com", "--concurrency", "5")
+        *_, concurrency, _ = opts("u", "https://x.com", "--concurrency", "5")
         assert concurrency == 5
 
     def test_headless(self):
-        *_, headless, _ = opts("login", "https://x.com", "--headless")
+        *_, headless, _, _ = opts("login", "https://x.com", "--headless")
         assert headless is True
+
+    def test_retry_flag(self):
+        *_, retry_transient = opts("u", "https://x.com", "--retry")
+        assert retry_transient is True
 
     def test_unknown_flag_passthrough(self):
         remaining, *_ = opts("u", "https://x.com", "--weird")
@@ -533,7 +546,9 @@ class TestStrategyMemory:
         webget._learn_strategy("old.com", "crawl4ai")
         # Age the entry beyond the TTL by shifting the clock forward.
         real_time = webget.time.time
-        monkeypatch.setattr(webget.time, "time", lambda: real_time() + webget._STRATEGY_MEMORY_TTL + 1)
+        monkeypatch.setattr(
+            webget.time, "time", lambda: real_time() + webget._STRATEGY_MEMORY_TTL + 1
+        )
         assert webget._load_strategy_memory() == {}
 
     def test_fresh_entry_survives(self, isolated_env):
