@@ -5,6 +5,13 @@ All notable changes to webget are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-03
+
+### Added
+- SSRF guard: Dual-resolver DNS fallback via DoH (Cloudflare 1.1.1.1 / Google 8.8.8.8) when system `getaddrinfo` raises `socket.gaierror`, preventing false-negative unreachable errors on valid infrastructure domains while enforcing SSRF checks on resolved IPs.
+- Ladder & CLI: Opt-in transient retry pass (`--retry` / `-r` / `retry_transient=True` in `scrape_many`) to automatically retry HTTP fast-path requests that encounter transient timeouts before triggering expensive browser fallback.
+- URL Discovery: `webget map <url>` command and MCP `map` tool for fast sitemap and `robots.txt` URL discovery.
+
 ## [0.10.0] - 2026-09-01
 
 ### Changed
@@ -220,6 +227,9 @@ All notable changes to webget are documented here. Format follows
   scrape (`su`), batch stdin, `-c`/`-H`/`-n`/`-t` options, JSON output.
 - Zero API keys, unlimited usage.
 
+[0.11.0]: https://github.com/DavidPandleton/webget/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/DavidPandleton/webget/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/DavidPandleton/webget/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/DavidPandleton/webget/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/DavidPandleton/webget/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/DavidPandleton/webget/compare/v0.7.1...v0.7.2
