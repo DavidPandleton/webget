@@ -127,7 +127,51 @@ def _convert_non_html(ctype, body, url):
         if "csv" in low:
             return url, _csv_to_gfm(body), meta
         return url, body.decode("utf-8", errors="replace").strip(), meta
+    if "xml" in low or "rss" in low or "atom" in low or "feed" in low:
+        return url, _feed_to_links(body), meta
     raise RuntimeError(f"not HTML ({ctype or 'unknown'})")
+
+
+def _feed_to_links(body):
+    """Convert RSS/Atom XML bytes to a markdown link list."""
+    import xml.etree.ElementTree as _ET
+
+    try:
+        root = _ET.fromstring(body)
+    except Exception:  # noqa: BLE001 - malformed XML falls back to raw text
+        return body.decode("utf-8", errors="replace").strip()
+    lines = []
+    for item in root.iter("item"):  # RSS
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        desc = (item.findtext("description") or "").strip()
+        if title and link:
+            lines.append(f"- [{title}]({link})")
+        elif title:
+            lines.append(f"- {title}")
+        if desc:
+            lines.append(f"  > {desc[:200]}")
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    for entry in root.findall(".//atom:entry", ns):  # Atom
+        t = entry.find("atom:title", ns)
+        title = (t.text or "").strip() if t is not None else ""
+        link = ""
+        for l in entry.findall("atom:link", ns):
+            href = (l.get("href") or "").strip()
+            if href and (l.get("rel", "alternate") == "alternate" or not l.get("rel")):
+                link = href
+                break
+        s = entry.find("atom:summary", ns)
+        desc = (s.text or "").strip() if s is not None else ""
+        if title and link:
+            lines.append(f"- [{title}]({link})")
+        elif title:
+            lines.append(f"- {title}")
+        if desc:
+            lines.append(f"  > {desc[:200]}")
+    if lines:
+        return "\n".join(lines)
+    return body.decode("utf-8", errors="replace").strip()
 
 
 def _csv_to_gfm(body):

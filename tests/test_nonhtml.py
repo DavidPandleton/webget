@@ -26,3 +26,36 @@ class TestCsvRouting:
         body = b"a,b\nx|y,z\n"
         _, md, _ = webget._convert_non_html("text/csv", body, "https://example.com/d.csv")
         assert "x\\|y" in md
+
+
+class TestFeedRouting:
+    RSS = (
+        b'<?xml version="1.0"?><rss version="2.0"><channel><title>Blog</title>'
+        b"<item><title>Post A</title><link>https://ex.com/a</link>"
+        b"<description>First post here</description></item>"
+        b"<item><title>Post B</title><link>https://ex.com/b</link></item>"
+        b"</channel></rss>"
+    )
+    ATOM = (
+        b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">'
+        b"<title>Blog</title>"
+        b'<entry><title>Entry One</title><link href="https://ex.com/1"/>'
+        b"<summary>Summary one</summary></entry>"
+        b"</feed>"
+    )
+
+    def test_rss_becomes_link_list(self):
+        title, md, meta = webget._convert_non_html("application/rss+xml", self.RSS, "https://ex.com/feed")
+        assert "[Post A](https://ex.com/a)" in md
+        assert "[Post B](https://ex.com/b)" in md
+        assert "First post here" in md
+
+    def test_atom_becomes_link_list(self):
+        _, md, _ = webget._convert_non_html("application/atom+xml", self.ATOM, "https://ex.com/feed")
+        assert "[Entry One](https://ex.com/1)" in md
+
+    def test_xml_without_items_falls_back_to_text(self):
+        _, md, _ = webget._convert_non_html(
+            "application/xml", b"<note><to>u</to></note>", "https://ex.com/n.xml"
+        )
+        assert "to" in md
