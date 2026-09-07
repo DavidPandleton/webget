@@ -124,8 +124,31 @@ def _convert_non_html(ctype, body, url):
             pretty = body.decode("utf-8", errors="replace")
         return url, f"```json\n{pretty}\n```", meta
     if low.startswith("text/"):
+        if "csv" in low:
+            return url, _csv_to_gfm(body), meta
         return url, body.decode("utf-8", errors="replace").strip(), meta
     raise RuntimeError(f"not HTML ({ctype or 'unknown'})")
+
+
+def _csv_to_gfm(body):
+    """Convert CSV bytes to a GitHub-flavored markdown table."""
+    import csv as _csv
+    import io as _io
+
+    try:
+        rows = list(_csv.reader(_io.StringIO(body.decode("utf-8", errors="replace"))))
+    except Exception:  # noqa: BLE001 - malformed CSV falls back to raw text
+        return body.decode("utf-8", errors="replace").strip()
+    rows = [r for r in rows if r]
+    if not rows:
+        return ""
+    esc = lambda c: (c or "").replace("|", "\\|")  # noqa: E731
+    header = "| " + " | ".join(esc(c) for c in rows[0]) + " |"
+    sep = "| " + " | ".join("---" for _ in rows[0]) + " |"
+    lines = [header, sep]
+    for r in rows[1:]:
+        lines.append("| " + " | ".join(esc(c) for c in r) + " |")
+    return "\n".join(lines)
 
 
 async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
