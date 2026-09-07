@@ -59,3 +59,41 @@ class TestFeedRouting:
             "application/xml", b"<note><to>u</to></note>", "https://ex.com/n.xml"
         )
         assert "to" in md
+
+
+class TestPdfRouting:
+    def test_pdf_routing_uses_pypdf(self, monkeypatch):
+        import sys
+        import types
+
+        fake_page = types.SimpleNamespace(extract_text=lambda: "Hello PDF page one")
+        fake_reader = lambda *a, **k: types.SimpleNamespace(pages=[fake_page])  # noqa: E731
+        fake_mod = types.SimpleNamespace(PdfReader=fake_reader)
+        monkeypatch.setitem(sys.modules, "pypdf", fake_mod)
+        title, md, meta = webget._convert_non_html(
+            "application/pdf", b"%PDF-fake", "https://ex.com/d.pdf"
+        )
+        assert "Hello PDF page one" in md
+        assert meta["site_name"] == "ex.com"
+
+    def test_pdf_missing_dep_errors_clearly(self, monkeypatch):
+        import sys
+
+        monkeypatch.setitem(sys.modules, "pypdf", None)
+        import pytest
+
+        with pytest.raises(RuntimeError, match="pypdf"):
+            webget._convert_non_html("application/pdf", b"%PDF-fake", "https://ex.com/d.pdf")
+
+    def test_pdf_empty_text_errors(self, monkeypatch):
+        import sys
+        import types
+
+        fake_page = types.SimpleNamespace(extract_text=lambda: "  ")
+        fake_reader = lambda *a, **k: types.SimpleNamespace(pages=[fake_page])  # noqa: E731
+        fake_mod = types.SimpleNamespace(PdfReader=fake_reader)
+        monkeypatch.setitem(sys.modules, "pypdf", fake_mod)
+        import pytest
+
+        with pytest.raises(RuntimeError, match="no extractable text"):
+            webget._convert_non_html("application/pdf", b"%PDF-fake", "https://ex.com/d.pdf")

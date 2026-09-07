@@ -26,6 +26,7 @@ dependencies = [
     "httpx",
     "trafilatura",
     "markdownify",
+    "pypdf",
 ]
 
 [project.urls]

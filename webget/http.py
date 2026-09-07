@@ -129,7 +129,32 @@ def _convert_non_html(ctype, body, url):
         return url, body.decode("utf-8", errors="replace").strip(), meta
     if "xml" in low or "rss" in low or "atom" in low or "feed" in low:
         return url, _feed_to_links(body), meta
+    if "pdf" in low:
+        return url, _pdf_to_text(body), meta
     raise RuntimeError(f"not HTML ({ctype or 'unknown'})")
+
+
+def _pdf_to_text(body):
+    """Extract per-page text from PDF bytes via pypdf."""
+    try:
+        import io as _io
+
+        from pypdf import PdfReader
+    except ImportError:
+        raise RuntimeError("PDF content requires 'pypdf' (pip install webget-cli)") from None
+    reader = PdfReader(_io.BytesIO(body))
+    parts = []
+    for i, page in enumerate(reader.pages):
+        try:
+            t = page.extract_text() or ""
+        except Exception:  # noqa: BLE001 - one bad page must not kill the doc
+            t = ""
+        if t.strip():
+            parts.append(f"## Page {i + 1}\n\n{t.strip()}")
+    text = "\n\n".join(parts)
+    if not text.strip():
+        raise RuntimeError("PDF has no extractable text")
+    return text
 
 
 def _feed_to_links(body):
