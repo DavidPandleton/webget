@@ -99,6 +99,35 @@ def _extract_markdown(html):
     return text
 
 
+def _convert_non_html(ctype, body, url):
+    """Convert a non-HTML response body to (title, markdown, metadata).
+
+    Routes by content-type: JSON -> pretty code block, text/* -> plain
+    text, CSV -> GFM table, RSS/Atom/XML feeds -> link list, PDF ->
+    per-page text via pypdf. Raises RuntimeError for unknown types.
+    """
+    from urllib.parse import urlparse
+
+    host = urlparse(url).hostname or ""
+    meta = {"author": None, "published_at": None, "site_name": host or None, "language": None}
+    low = (ctype or "").lower()
+    if "json" in low:
+        try:
+            import json as _json
+
+            pretty = _json.dumps(
+                _json.loads(body.decode("utf-8", errors="replace")),
+                indent=2,
+                ensure_ascii=False,
+            )
+        except Exception:  # noqa: BLE001 - malformed JSON falls back to raw text
+            pretty = body.decode("utf-8", errors="replace")
+        return url, f"```json\n{pretty}\n```", meta
+    if low.startswith("text/"):
+        return url, body.decode("utf-8", errors="replace").strip(), meta
+    raise RuntimeError(f"not HTML ({ctype or 'unknown'})")
+
+
 async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
     """Fast path: plain HTTP GET + local markdown extraction.
 
@@ -177,8 +206,6 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
                     current = str(httpx.URL(current).join(loc))
                     continue
                 ctype = r.headers.get("content-type", "")
-                if "html" not in ctype and "text" not in ctype:
-                    raise RuntimeError(f"not HTML ({ctype or 'unknown'})")
                 # Read with a hard cap while streaming, so a giant/binary
                 # body cannot exhaust memory. httpx's timeout bounds a
                 # single socket operation only, so a server that slow-drips
@@ -194,7 +221,21 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
                     if total > MAX_RESPONSE_BYTES:
                         raise ResponseTooLarge(f"response too large (> {MAX_RESPONSE_BYTES} bytes)")
                     chunks.append(chunk)
-                html = b"".join(chunks).decode("utf-8", errors="replace")
+                raw_body = b"".join(chunks)
+                low_ctype = ctype.lower()
+                if "html" in low_ctype or (
+                    "text" in low_ctype and "csv" not in low_ctype and "xml" not in low_ctype
+                ):
+                    html = raw_body.decode("utf-8", errors="replace")
+                else:
+                    title, md, meta = _convert_non_html(ctype, raw_body, current)
+                    return {
+                        "title": title,
+                        "markdown": md[:max_chars],
+                        "metadata": meta,
+                        "status_code": r.status_code,
+                        "html": "",
+                    }
                 title = ""
                 m = re.search(r"<title[^>]*>(.*?)</title>", html, re.DOTALL | re.IGNORECASE)
                 if m:

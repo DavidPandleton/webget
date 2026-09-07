@@ -35,6 +35,7 @@ from .firecrawl import fetch_firecrawl, firecrawl_key
 from .http import (
     MAX_RESPONSE_BYTES,
     ResponseTooLarge,
+    _convert_non_html,
     _extract_markdown,
     _extract_with_metadata,
     fetch_http,
@@ -107,6 +108,7 @@ __all__ = [
     "_crawl4ai_once",
     "_domain_match",
     "_effective_cookies",
+    "_convert_non_html",
     "_extract_markdown",
     "_extract_with_metadata",
     "_fmt_age",
