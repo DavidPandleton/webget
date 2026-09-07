@@ -154,10 +154,20 @@ path can reuse them. Secrets are never printed.
       "authenticated": true,
       "state": "success"
     },
+    "metadata": {
+      "author": "Jane Doe",
+      "published_at": "2026-09-01",
+      "site_name": "Campus Portal",
+      "language": "id"
+    },
     "error": null
   }
 }
 ```
+
+`metadata` (author, published date, site name, language) comes from
+trafilatura extraction on the HTTP path; values are `null` when unknown
+or when the winning strategy was not HTTP.
 
 Status values: `success | login_required | challenge | blocked | error`.
 

@@ -106,17 +106,15 @@ class TestOutputExposure:
         }
 
     def test_cli_su_json_rebuild_has_metadata(self, fresh_cache, monkeypatch, capsys):
-        import asyncio
-
         import webget_cli as wgcli
         from webget import cli as cli_mod
 
         monkeypatch.setattr(
-            cli_mod, "search", lambda *a, **k: [{"title": "T", "url": fresh_cache.url("/long"), "snippet": "s"}]
+            cli_mod,
+            "search",
+            lambda *a, **k: [{"title": "T", "url": fresh_cache.url("/long"), "snippet": "s"}],
         )
-        monkeypatch.setattr(
-            "sys.argv", ["webget", "su", "q", "1", "--json", "--no-cache"]
-        )
+        monkeypatch.setattr("sys.argv", ["webget", "su", "q", "1", "--json", "--no-cache"])
         wgcli.main()
         import json
 

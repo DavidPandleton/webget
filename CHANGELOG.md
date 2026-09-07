@@ -5,6 +5,9 @@ All notable changes to webget are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- Metadata: fetch results now carry a `metadata` dict (`author`, `published_at`, `site_name`, `language`) extracted via trafilatura on the HTTP fast path, exposed in `scrape_many` output, CLI `--json`, and MCP `fetch`/`search_fetch`. Values are `null` when unknown or when the winning strategy was not HTTP.
+
 ## [0.11.0] - 2026-09-03
 
 ### Added
