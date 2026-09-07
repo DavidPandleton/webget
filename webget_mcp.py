@@ -230,6 +230,7 @@ async def search_fetch(
                 "snippet": r.get("snippet", ""),
                 "scrape_title": got.get("title", ""),
                 "markdown": got.get("markdown", ""),
+                "metadata": got.get("metadata"),
                 "status": got.get("status", ""),
                 "method": got.get("method", ""),
                 "cached": got.get("cached", False),

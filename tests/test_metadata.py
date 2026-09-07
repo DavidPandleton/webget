@@ -74,3 +74,58 @@ class TestFetchHttpMetadata:
             "site_name",
             "language",
         }
+
+
+class TestOutputExposure:
+    def test_mcp_fetch_passthrough_has_metadata(self, fresh_cache):
+        import asyncio
+
+        import webget_mcp
+
+        res = asyncio.run(
+            webget_mcp.fetch(fresh_cache.url("/long"), strategy="http", no_cache=True)
+        )
+        assert set(res["metadata"]) == {"author", "published_at", "site_name", "language"}
+
+    def test_mcp_search_fetch_rebuild_has_metadata(self, fresh_cache, monkeypatch):
+        import asyncio
+
+        import webget_mcp
+
+        monkeypatch.setattr(
+            webget_mcp.wg,
+            "search",
+            lambda *a, **k: [{"title": "T", "url": fresh_cache.url("/long"), "snippet": "s"}],
+        )
+        out = asyncio.run(webget_mcp.search_fetch("q", n=1, no_cache=True))
+        assert set(out[0]["metadata"]) == {
+            "author",
+            "published_at",
+            "site_name",
+            "language",
+        }
+
+    def test_cli_su_json_rebuild_has_metadata(self, fresh_cache, monkeypatch, capsys):
+        import asyncio
+
+        import webget_cli as wgcli
+        from webget import cli as cli_mod
+
+        monkeypatch.setattr(
+            cli_mod, "search", lambda *a, **k: [{"title": "T", "url": fresh_cache.url("/long"), "snippet": "s"}]
+        )
+        monkeypatch.setattr(
+            "sys.argv", ["webget", "su", "q", "1", "--json", "--no-cache"]
+        )
+        wgcli.main()
+        import json
+
+        printed = capsys.readouterr().out
+        data = json.loads(printed)
+        url = fresh_cache.url("/long")
+        assert set(data[url]["metadata"]) == {
+            "author",
+            "published_at",
+            "site_name",
+            "language",
+        }
