@@ -39,3 +39,38 @@ class TestExtractWithMetadata:
         out = webget._extract_markdown("<h1>H</h1>" + body)
         assert isinstance(out, str)
         assert "# H" in out
+
+
+class TestFetchHttpMetadata:
+    def test_fetch_http_result_carries_metadata(self, fresh_cache):
+        import asyncio
+
+        res = asyncio.run(webget.fetch_http(fresh_cache.url("/long"), 6000, timeout=10))
+        assert set(res["metadata"]) == {"author", "published_at", "site_name", "language"}
+
+    def test_scrape_many_success_carries_metadata(self, fresh_cache):
+        import asyncio
+
+        out = asyncio.run(webget.scrape_many([fresh_cache.url("/long")], strategy="http"))
+        url = fresh_cache.url("/long")
+        assert out[url]["status"] == "success"
+        assert set(out[url]["metadata"]) == {
+            "author",
+            "published_at",
+            "site_name",
+            "language",
+        }
+
+    def test_cached_hit_carries_metadata(self, fresh_cache):
+        import asyncio
+
+        url = fresh_cache.url("/long")
+        asyncio.run(webget.scrape_many([url], strategy="http"))
+        out = asyncio.run(webget.scrape_many([url], strategy="http"))
+        assert out[url]["cached"] is True
+        assert set(out[url]["metadata"]) == {
+            "author",
+            "published_at",
+            "site_name",
+            "language",
+        }

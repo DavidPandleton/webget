@@ -199,10 +199,11 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
                 m = re.search(r"<title[^>]*>(.*?)</title>", html, re.DOTALL | re.IGNORECASE)
                 if m:
                     title = re.sub(r"\s+", " ", m.group(1)).strip()
-                md = await asyncio.to_thread(_extract_markdown, html)
+                md, meta = await asyncio.to_thread(_extract_with_metadata, html)
                 return {
                     "title": title,
                     "markdown": md[:max_chars],
+                    "metadata": meta,
                     "status_code": r.status_code,
                     "html": html[:8000],
                 }

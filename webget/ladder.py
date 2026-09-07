@@ -144,10 +144,16 @@ def _reorder_steps_by_domain(steps, url):
     return [preferred] + [s for s in steps if s != preferred]
 
 
+def _empty_meta():
+    """Fresh empty metadata dict (never shared mutable module state)."""
+    return {"author": None, "published_at": None, "site_name": None, "language": None}
+
+
 def _normalize_hit(hit):
     return {
         "title": hit.get("title", ""),
         "markdown": hit.get("markdown", ""),
+        "metadata": hit.get("metadata") or _empty_meta(),
         "status": "success",
         "method": "cache",
         "cached": True,
@@ -370,6 +376,7 @@ async def scrape_many(
             results[u] = {
                 "title": "",
                 "markdown": "",
+                "metadata": _empty_meta(),
                 "status": "error",
                 "method": "",
                 "cached": False,
@@ -416,6 +423,7 @@ async def scrape_many(
             out = {
                 "title": res.get("title", ""),
                 "markdown": res.get("markdown", ""),
+                "metadata": res.get("metadata") or _empty_meta(),
                 "status": "success",
                 "method": method,
                 "cached": False,
@@ -460,6 +468,7 @@ async def scrape_many(
                     return url, {
                         "title": "",
                         "markdown": "",
+                        "metadata": _empty_meta(),
                         "status": "error",
                         "method": "http",
                         "cached": False,
@@ -602,6 +611,7 @@ async def scrape_many(
         results[url] = {
             "title": "",
             "markdown": "",
+            "metadata": _empty_meta(),
             "status": state,
             "method": method,
             "cached": False,
