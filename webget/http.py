@@ -33,14 +33,40 @@ class ResponseTooLarge(Exception):
     """
 
 
-def _extract_markdown(html):
-    """Try trafilatura (clean article text) then markdownify (full markdown)."""
+_EMPTY_META = {"author": None, "published_at": None, "site_name": None, "language": None}
+
+
+def _extract_with_metadata(html):
+    """Extract (text, metadata) from HTML.
+
+    Tries trafilatura JSON output (clean article text + author/date/site/
+    language metadata) first, then markdownify as a text-only fallback
+    (empty metadata). Returns a (str, dict) tuple; metadata keys are
+    always author/published_at/site_name/language, values None when
+    unknown.
+    """
     try:
+        import json
+
         import trafilatura
 
-        text = trafilatura.extract(html, include_comments=False, include_tables=True)
-        if text and len(text.strip()) > 100:
-            return text.strip()
+        raw = trafilatura.extract(
+            html,
+            output_format="json",
+            with_metadata=True,
+            include_comments=False,
+            include_tables=True,
+        )
+        if raw:
+            doc = json.loads(raw)
+            text = (doc.get("text") or "").strip()
+            if text and len(text) > 100:
+                return text, {
+                    "author": doc.get("author"),
+                    "published_at": doc.get("date"),
+                    "site_name": doc.get("sitename"),
+                    "language": doc.get("language") or doc.get("lang"),
+                }
     except Exception:  # noqa: BLE001, S110 - extraction libs vary; fall through
         pass
     try:
@@ -60,9 +86,17 @@ def _extract_markdown(html):
             # output style (verified differential 2026-08-08) so the fallback
             # stays close to 0.7.2 (semantic parity).
             converted = md(html, bullets="*", heading_style="ATX").strip()
-        return converted if len(converted) > 50 else ""
+        if len(converted) > 50:
+            return converted, dict(_EMPTY_META)
+        return "", dict(_EMPTY_META)
     except Exception:  # noqa: BLE001 - best-effort extraction, empty is fine
-        return ""
+        return "", dict(_EMPTY_META)
+
+
+def _extract_markdown(html):
+    """Try trafilatura (clean article text) then markdownify (full markdown)."""
+    text, _ = _extract_with_metadata(html)
+    return text
 
 
 async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
