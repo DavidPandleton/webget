@@ -413,7 +413,11 @@ async def scrape_many(
             reasons[url].append(("error", method, detail))
             return None
         state, authenticated = _auth_state(res, profile)
-        if state == "success" and len((res.get("markdown") or "").strip()) >= 100:
+        # Thin-check guards HTML extraction (an empty/login page misread as
+        # content). Non-HTML conversions (JSON/CSV/feed/PDF) are already
+        # validated by their parser, so a short-but-valid payload counts.
+        thin_ok = len((res.get("markdown") or "").strip()) >= 100 or res.get("non_html")
+        if state == "success" and thin_ok:
             auth = {"profile": profile, "authenticated": authenticated, "state": state}
             # Record which strategy won for this domain so future 'auto'
             # batches can try it first (per-domain strategy memory).

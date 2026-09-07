@@ -13,6 +13,13 @@ class TestJsonRouting:
         assert "world" in res["markdown"]
         assert res["metadata"]["site_name"] == "127.0.0.1"
 
+    def test_scrape_many_json_is_success(self, fresh_cache):
+        url = fresh_cache.url("/json")
+        out = asyncio.run(webget.scrape_many([url], strategy="http", no_cache=True))
+        assert out[url]["status"] == "success"
+        assert out[url]["method"] == "http"
+        assert "hello" in out[url]["markdown"]
+
 
 class TestCsvRouting:
     def test_csv_becomes_gfm_table(self):

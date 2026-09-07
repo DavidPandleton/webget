@@ -325,6 +325,7 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
                         "title": title,
                         "markdown": md[:max_chars],
                         "metadata": meta,
+                        "non_html": True,
                         "status_code": r.status_code,
                         "html": "",
                     }
