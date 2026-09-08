@@ -211,7 +211,7 @@ def _csv_to_gfm(body):
     rows = [r for r in rows if r]
     if not rows:
         return ""
-    esc = lambda c: (c or "").replace("|", "\\|")  # noqa: E731
+    esc = lambda c: (c or "").replace("|", "\\|")
     header = "| " + " | ".join(esc(c) for c in rows[0]) + " |"
     sep = "| " + " | ".join("---" for _ in rows[0]) + " |"
     lines = [header, sep]

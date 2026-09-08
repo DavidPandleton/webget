@@ -7,6 +7,7 @@ All notable changes to webget are documented here. Format follows
 
 ### Added
 - Metadata: fetch results now carry a `metadata` dict (`author`, `published_at`, `site_name`, `language`) extracted via trafilatura on the HTTP fast path, exposed in `scrape_many` output, CLI `--json`, and MCP `fetch`/`search_fetch`. Values are `null` when unknown or when the winning strategy was not HTTP.
+- Non-HTML routing: the HTTP fast path converts JSON (pretty code block), CSV (GFM table), RSS/Atom feeds (link list), PDFs (per-page text via new `pypdf` core dep), and plain text instead of erroring `not HTML`. Valid non-HTML payloads skip the 100-char thin-check in the ladder.
 
 ## [0.11.0] - 2026-09-03
 

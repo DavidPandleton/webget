@@ -24,7 +24,7 @@ class TestJsonRouting:
 class TestCsvRouting:
     def test_csv_becomes_gfm_table(self):
         body = b"name,age\nbudi,25\nsiti,30\n"
-        title, md, meta = webget._convert_non_html("text/csv", body, "https://example.com/d.csv")
+        _title, md, meta = webget._convert_non_html("text/csv", body, "https://example.com/d.csv")
         assert "| name | age |" in md
         assert "| budi | 25 |" in md
         assert meta["site_name"] == "example.com"
@@ -52,13 +52,17 @@ class TestFeedRouting:
     )
 
     def test_rss_becomes_link_list(self):
-        title, md, meta = webget._convert_non_html("application/rss+xml", self.RSS, "https://ex.com/feed")
+        _title, md, _meta = webget._convert_non_html(
+            "application/rss+xml", self.RSS, "https://ex.com/feed"
+        )
         assert "[Post A](https://ex.com/a)" in md
         assert "[Post B](https://ex.com/b)" in md
         assert "First post here" in md
 
     def test_atom_becomes_link_list(self):
-        _, md, _ = webget._convert_non_html("application/atom+xml", self.ATOM, "https://ex.com/feed")
+        _, md, _ = webget._convert_non_html(
+            "application/atom+xml", self.ATOM, "https://ex.com/feed"
+        )
         assert "[Entry One](https://ex.com/1)" in md
 
     def test_xml_without_items_falls_back_to_text(self):
@@ -74,10 +78,10 @@ class TestPdfRouting:
         import types
 
         fake_page = types.SimpleNamespace(extract_text=lambda: "Hello PDF page one")
-        fake_reader = lambda *a, **k: types.SimpleNamespace(pages=[fake_page])  # noqa: E731
+        fake_reader = lambda *a, **k: types.SimpleNamespace(pages=[fake_page])
         fake_mod = types.SimpleNamespace(PdfReader=fake_reader)
         monkeypatch.setitem(sys.modules, "pypdf", fake_mod)
-        title, md, meta = webget._convert_non_html(
+        _title, md, meta = webget._convert_non_html(
             "application/pdf", b"%PDF-fake", "https://ex.com/d.pdf"
         )
         assert "Hello PDF page one" in md
@@ -97,7 +101,7 @@ class TestPdfRouting:
         import types
 
         fake_page = types.SimpleNamespace(extract_text=lambda: "  ")
-        fake_reader = lambda *a, **k: types.SimpleNamespace(pages=[fake_page])  # noqa: E731
+        fake_reader = lambda *a, **k: types.SimpleNamespace(pages=[fake_page])
         fake_mod = types.SimpleNamespace(PdfReader=fake_reader)
         monkeypatch.setitem(sys.modules, "pypdf", fake_mod)
         import pytest

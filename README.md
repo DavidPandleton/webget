@@ -171,6 +171,11 @@ or when the winning strategy was not HTTP.
 
 Status values: `success | login_required | challenge | blocked | error`.
 
+The HTTP path also handles non-HTML: JSON becomes a pretty code block,
+CSV becomes a GFM table, RSS/Atom feeds become a link list, PDFs are
+extracted per page (via `pypdf`), plain text passes through. Valid
+non-HTML payloads count as success even when short.
+
 ## Status detection rules
 
 | Signal | State |
