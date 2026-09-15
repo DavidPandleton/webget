@@ -3,7 +3,7 @@
 All notable changes to webget are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.12.0] - 2026-09-16
 
 ### Added
 - Metadata: fetch results now carry a `metadata` dict (`author`, `published_at`, `site_name`, `language`) extracted via trafilatura on the HTTP fast path, exposed in `scrape_many` output, CLI `--json`, and MCP `fetch`/`search_fetch`. Values are `null` when unknown or when the winning strategy was not HTTP.
@@ -231,6 +231,7 @@ All notable changes to webget are documented here. Format follows
   scrape (`su`), batch stdin, `-c`/`-H`/`-n`/`-t` options, JSON output.
 - Zero API keys, unlimited usage.
 
+[0.12.0]: https://github.com/DavidPandleton/webget/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/DavidPandleton/webget/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/DavidPandleton/webget/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/DavidPandleton/webget/compare/v0.8.0...v0.9.0
