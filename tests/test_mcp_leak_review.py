@@ -24,7 +24,7 @@ LEAK_MARKERS = [
     "/home/",
     "Traceback",
     'File "',
-    "line ",
+    '", line ',  # traceback frames only (plain "line " false-positives on real content, e.g. "online ", "deadline ")
 ]
 
 # The literal variable NAME may legitimately appear in error messages
