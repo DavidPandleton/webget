@@ -3,6 +3,11 @@
 All notable changes to webget are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
 
+## [0.12.1] - 2026-09-16
+
+### Fixed
+- Extract: oversized inline base64 image payloads (`data:image/...;base64,` with a payload over 200 chars) are replaced with `stripped` in HTTP fast-path markdown. The markdownify fallback used to keep them verbatim, so a single hero image could burn hundreds of KB of tokens as unreadable noise. Alt text and the mime prefix are preserved; short payloads are left untouched.
+
 ## [0.12.0] - 2026-09-16
 
 ### Added
@@ -231,6 +236,7 @@ All notable changes to webget are documented here. Format follows
   scrape (`su`), batch stdin, `-c`/`-H`/`-n`/`-t` options, JSON output.
 - Zero API keys, unlimited usage.
 
+[0.12.1]: https://github.com/DavidPandleton/webget/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/DavidPandleton/webget/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/DavidPandleton/webget/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/DavidPandleton/webget/compare/v0.9.0...v0.10.0
