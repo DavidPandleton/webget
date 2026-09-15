@@ -35,6 +35,30 @@ class ResponseTooLarge(Exception):
 
 _EMPTY_META = {"author": None, "published_at": None, "site_name": None, "language": None}
 
+# Inline data:image payloads longer than this (base64 chars) are replaced
+# in extracted markdown; shorter ones are left alone since they cost little
+# and may carry meaningful thumbnails.
+_BASE64_PAYLOAD_MIN = 200
+_DATA_URL_IMAGE_RE = re.compile(r"(data:image/[a-z0-9.+-]+;base64,)([A-Za-z0-9+/=]+)")
+
+
+def _strip_base64_images(text):
+    """Replace oversized inline base64 image payloads with 'stripped'.
+
+    Pages routinely inline images as data URLs; a single hero image can
+    carry hundreds of KB of base64, which the markdownify fallback would
+    otherwise pass through verbatim as token-burning noise. Keeps the
+    mime prefix and the markdown around the URL (alt text lives outside
+    the URL), drops only the payload.
+    """
+
+    def _repl(m):
+        if len(m.group(2)) <= _BASE64_PAYLOAD_MIN:
+            return m.group(0)
+        return m.group(1) + "stripped"
+
+    return _DATA_URL_IMAGE_RE.sub(_repl, text)
+
 
 def _extract_with_metadata(html):
     """Extract (text, metadata) from HTML.
@@ -86,6 +110,7 @@ def _extract_with_metadata(html):
             # output style (verified differential 2026-08-08) so the fallback
             # stays close to 0.7.2 (semantic parity).
             converted = md(html, bullets="*", heading_style="ATX").strip()
+            converted = _strip_base64_images(converted)
         if len(converted) > 50:
             return converted, dict(_EMPTY_META)
         return "", dict(_EMPTY_META)
