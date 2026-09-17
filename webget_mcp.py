@@ -71,12 +71,17 @@ def _validate_profile(profile):
 
 
 @mcp.tool()
-async def search(query: str, n: int = 5) -> list[dict]:
-    """Search the web (DuckDuckGo). Returns up to n results with title/url/snippet."""
+async def search(query: str, n: int = 5, engine: str | None = None) -> list[dict]:
+    """Search the web via the ddgs metasearch. Returns up to n results with
+    title/url/snippet.
+
+    engine: None/auto = all engines (ddgs default), or a comma-delimited
+    subset like "brave,duckduckgo". Unknown names degrade to auto.
+    """
     err = _clamp("n", n, 1, _MAX_SEARCH_N)
     if err:
         return [{"error": err}]
-    return await asyncio.to_thread(wg.search, query, n)
+    return await asyncio.to_thread(wg.search, query, n, engine)
 
 
 @mcp.tool()
@@ -189,6 +194,7 @@ async def search_fetch(
     timeout: int = 20,
     no_cache: bool = False,
     profile: str | None = None,
+    engine: str | None = None,
 ) -> list[dict]:
     """Search the web, then scrape the top n results in parallel.
 
@@ -198,6 +204,8 @@ async def search_fetch(
     profile: name of a locally stored login session (created with
     'webget login URL --profile NAME'). Invalid names and unknown
     profiles are hard errors (never a silent anonymous fallback).
+    engine: None/auto = all ddgs engines, or a subset like
+    "brave,duckduckgo". Unknown names degrade to auto.
     """
     for name, value, lo, hi in (
         ("n", n, 1, _MAX_SEARCH_N),
@@ -211,7 +219,7 @@ async def search_fetch(
         err = _validate_profile(profile)
         if err:
             return [{"error": err}]
-    results = await asyncio.to_thread(wg.search, query, n)
+    results = await asyncio.to_thread(wg.search, query, n, engine)
     urls = [r["url"] for r in results]
     scraped = await wg.scrape_many(
         urls,

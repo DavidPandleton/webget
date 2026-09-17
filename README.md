@@ -89,7 +89,8 @@ uv pip install -e ".[dev,browser]"
 ## Usage
 
 ```bash
-webget s "rust async runtime"             # search DuckDuckGo (top 5)
+webget s "rust async runtime"             # search (ddgs metasearch, top 5)
+webget s "rust async runtime" --engine brave,duckduckgo   # subset: faster than auto
 webget u https://example.com              # scrape (auto: http -> crawl4ai)
 webget su "llm inference" 5               # search + scrape top 5, parallel
 cat urls.txt | webget u -                 # batch scrape, one browser instance

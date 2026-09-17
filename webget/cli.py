@@ -1,7 +1,7 @@
 """CLI entry point: argparse + command dispatch.
 
 Usage (from --help):
-  webget s "query" [n]           Search via DuckDuckGo (default 5)
+  webget s "query" [n]           Search the web via ddgs metasearch (default 5)
   webget u "https://..."         Scrape URL -> markdown (HTTP fast path, falls back)
   webget su "query" [n]          Search + scrape top n results (default 3, parallel)
   webget s "q" | webget u -      Pipe: pass URL from search via stdin
@@ -20,6 +20,9 @@ Options:
   -n, --max-chars N   Max output chars (default: 10000 for u, 4000 for su)
   --limit N           Result count for s/su (default: 5 / 3)
   -t, --timeout N     Per-URL timeout in seconds (default: 20)
+  -e, --engine NAMES  Search engines (ddgs metasearch): auto or a
+                      comma-delimited subset like brave,duckduckgo.
+                      Unknown names degrade to auto (default: auto)
   --fresh             Bypass cache and re-scrape
   --ttl N             Cache TTL in seconds (default: 3600)
   --strategy S        Fetch strategy: auto|http|crawl4ai|firecrawl (default auto)
@@ -60,7 +63,7 @@ from .search import search
 __doc__ = (
     "webget - local search + scrape, zero API keys, unlimited usage.\n"
     "Usage:\n"
-    '  webget s "query" [n]           Search via DuckDuckGo (default 5)\n'
+    '  webget s "query" [n]           Search the web via ddgs metasearch (default 5)\n'
     '  webget u "https://..."         Scrape URL -> markdown (HTTP fast path, falls back)\n'
     '  webget su "query" [n]          Search + scrape top n results (default 3, parallel)\n'
     '  webget s "q" | webget u -      Pipe: pass URL from search via stdin\n'
@@ -89,6 +92,7 @@ def parse_opts(args):
     headless = False
     concurrency = None
     retry_transient = False
+    engine = None
     remaining = []
     i = 0
     while i < len(args):
@@ -104,6 +108,9 @@ def parse_opts(args):
         elif args[i] in ("-r", "--retry", "--retry-transient"):
             retry_transient = True
             i += 1
+        elif args[i] in ("-e", "--engine") and i + 1 < len(args):
+            engine = args[i + 1]
+            i += 2
         elif args[i] == "--no-cache":
             no_cache = True
             i += 1
@@ -153,6 +160,7 @@ def parse_opts(args):
         headless,
         concurrency,
         retry_transient,
+        engine,
     )
 
 
@@ -237,6 +245,7 @@ def main():
         headless,
         concurrency,
         retry_transient,
+        engine,
     ) = parse_opts(args)
 
     if concurrency is not None and concurrency < 1:
@@ -293,7 +302,7 @@ def main():
     if cmd == "s":
         n = limit or (int(args[2]) if len(args) > 2 else 5)
         try:
-            results = search(q, n=n)
+            results = search(q, n=n, engine=engine)
         except Exception as e:  # noqa: BLE001 - surface a clean error, not a traceback
             print(f"error: search failed: {e}")
             sys.exit(1)
@@ -347,7 +356,7 @@ def main():
         max_chars = max_chars_override or 4000
         timeout = timeout_override or 20
         try:
-            results = search(q, n=n)
+            results = search(q, n=n, engine=engine)
         except Exception as e:  # noqa: BLE001 - surface a clean error, not a traceback
             print(f"error: search failed: {e}")
             sys.exit(1)
