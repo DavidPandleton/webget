@@ -246,6 +246,7 @@ All notable changes to webget are documented here. Format follows
   scrape (`su`), batch stdin, `-c`/`-H`/`-n`/`-t` options, JSON output.
 - Zero API keys, unlimited usage.
 
+[0.13.0]: https://github.com/DavidPandleton/webget/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/DavidPandleton/webget/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/DavidPandleton/webget/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/DavidPandleton/webget/compare/v0.10.0...v0.11.0
