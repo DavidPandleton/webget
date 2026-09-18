@@ -3,7 +3,7 @@
 All notable changes to webget are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.13.0] - 2026-09-18
 
 ### Added
 - Multi-engine search: `webget s`/`su` accept `--engine` (or `-e`) and the MCP `search`/`search_fetch` tools accept an `engine` parameter. The `ddgs` dependency is a metasearch that aggregates 9 keyless engines (brave, duckduckgo, google, mojeek, startpage, wikipedia, yahoo, yandex and more); the default `auto` runs all of them, while a comma-delimited subset like `--engine brave,duckduckgo` is roughly 3-6x faster and routes around a single engine having a bad hour. Engine names are validated against ddgs's runtime registry and unknown names degrade to `auto` with a warning instead of failing, so a typo or a registry change between releases never kills a search.
