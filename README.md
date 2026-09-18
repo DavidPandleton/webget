@@ -125,11 +125,15 @@ Unknown names degrade to `auto` with a warning instead of failing, so a
 typo never kills a search.
 
 **Failover is automatic.** If the engine you named fails, or returns zero
-results, webget tries up to 3 further engines and returns the first
-non-empty set. This is not paranoia: engine reachability depends on where
-you are, not just whether a service is up. A benchmark from one residential
-connection found only 1 of 9 engines reachable, and `auto` survived purely
-because that one did.
+results, webget tries the remaining engines until a time budget is spent
+(15s by default, `WEBGET_FAILOVER_BUDGET_S` to override) and returns the
+first non-empty set. The budget replaced a fixed "3 engines" cap: a count is
+either too many (3 x 20s timeout = a minute of dead air) or too few (a live
+engine sitting fifth in line never got reached). At least two alternates are
+always tried, however fast the budget expires. This is not paranoia: engine
+reachability depends on where you are, not just whether a service is up. A
+benchmark from one residential connection found only 2 of 9 engines
+reachable, and `auto` survived purely because they did.
 
 Every substitution is announced, never silent:
 
@@ -154,6 +158,18 @@ $ webget s "linux kernel" --engine google --json
 
 This matters most over MCP, where a stderr warning is invisible to the
 agent: the payload is the only signal that the results came from elsewhere.
+
+**Failover order is learned, not hardcoded.** webget keeps a small health
+ledger per install (`~/.local/state/webget/engine_health.json`) recording
+whether each engine answered and how fast. When failover kicks in, engines
+are tried best-first by that record instead of in registry order. The ledger
+is advisory - it reorders candidates, it never removes one - and it decays:
+an engine marked dead last week is retried with no penalty this week, because
+the blocking that made it dead is exactly what changes. There is no baked-in
+ranking anywhere in the source; the same webget learns a different order on
+your machine than on the author's, which is the point.
+
+Diagnostics: `python -c "from webget import health; print(health.health_snapshot())"`
 
 > **MCP note (breaking in 0.13.0):** the `search` and `search_fetch` tools
 > now return an object `{results, engine, requested_engine, failed_over}`
@@ -290,6 +306,51 @@ Register as a local MCP server in opencode:
 
 Then prompt with `use webget` for search and scrape tasks. Run the server
 standalone with `webget-mcp` (stdio transport) or `python webget_mcp.py`.
+
+### Breaking change in 0.13.0: search returns an object, not a list
+
+`search` and `search_fetch` used to return a bare JSON array of results.
+They now return an object, because a list has nowhere to carry provenance:
+
+```jsonc
+// <= 0.12.1  ->  a list
+[ { "title": "...", "href": "...", "body": "..." }, ... ]
+
+// >= 0.13.0  ->  an object
+{
+  "results": [ { "title": "...", "href": "...", "body": "..." }, ... ],
+  "engine": "brave",            // the engine that actually answered
+  "requested_engine": "google", // what was asked for
+  "failed_over": true           // an alternative was attempted
+}
+```
+
+Error responses changed shape too:
+
+```jsonc
+// <= 0.12.1  ->  a plain error string / empty list
+// >= 0.13.0
+{
+  "error": "SearchError: RequestError(...)",
+  "results": []
+}
+```
+
+**How to migrate.** If you read the tool result as an array, read
+`.results` instead. In JavaScript that is `result.results` rather than
+`result`; in Python `data["results"]` rather than `data`. If you only
+iterate the hits, the change is mechanical.
+
+**Why it had to break.** Failover means the engine that answers is not
+always the engine that was asked for, and over MCP there is no stderr for a
+warning to land on, so the payload is the only place that fact can live.
+Keeping the list shape would have meant silently returning results from an
+unexpected engine with no way for a client to notice. An additive field was
+not possible: a JSON array cannot carry sibling keys.
+
+`fetch` is unchanged and still returns its string payload. The Python API is
+unchanged: `search()` still returns a list, and `search_with_provenance()`
+is the new opt-in that returns `(results, provenance)`.
 
 ### Authenticated sessions (profiles)
 

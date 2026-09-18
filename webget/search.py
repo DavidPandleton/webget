@@ -18,12 +18,34 @@ import json
 import os
 import tempfile
 
-# How many alternative engines to try after the requested one fails.
-# Small on purpose: worst-case latency is roughly (1 + this) x timeout, and
-# an agent calling search in a loop cannot afford a 9-engine timeout pile.
-# Three is enough to survive one engine being blocked without turning a
-# slow query into a very slow one.
-MAX_FAILOVER_ATTEMPTS = 3
+# Failover is bounded by TIME, not by a count of attempts.
+#
+# A count is a bad proxy for "have I tried enough". Three attempts is either
+# too many (3 x 20s timeout = 60s, far past what a caller will wait) or too
+# few (8 fast engines answered in 3s, yet engine 4 held the only working
+# result). The deadline measures the thing that actually matters.
+#
+# 15s is chosen to sit just under the common 20s HTTP client timeout, so a
+# caller that set its own timeout does not see webget outlive it. Override
+# with WEBGET_FAILOVER_BUDGET_S.
+FAILOVER_BUDGET_S = 15.0
+
+# Always attempt at least this many alternates regardless of the clock. Two
+# engines being blocked at once is common (the stratified benchmark saw whole
+# groups fail together), and a budget that expired after one try would give up
+# while a working engine was still one call away.
+MIN_FAILOVER_ATTEMPTS = 2
+
+
+def _failover_budget():
+    """Seconds allowed for the failover phase. Env-overridable for callers."""
+    raw = os.environ.get("WEBGET_FAILOVER_BUDGET_S")
+    if raw:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    return FAILOVER_BUDGET_S
 
 
 def known_engines():
@@ -90,14 +112,18 @@ def _warn(msg):
 def _failover_chain(first):
     """Ordered engines to try when `first` fails: the rest of the registry.
 
-    Ordered deterministically (registry order) excluding the one already
-    tried. Returns [] when the registry is unavailable, in which case there
-    is nothing to fail over to and the original error propagates.
+    Ordered by LEARNED HEALTH (webget.health), best first, with a stable
+    tiebreak on registry order for engines this install has never tried.
 
-    NOTE: this is deliberately NOT ranked by the 2026-09-18 benchmark.
-    That benchmark showed only 'brave' reliable from the author's host, but
-    engine health is host- and time-specific, so ranking it into the code
-    would bake one machine's ISP filtering into every install.
+    This is deliberately NOT ranked by any benchmark baked into the source.
+    The 0.13.0 benchmark showed only one or two engines reliable from the
+    author's host, but engine health is host-, time- and query-specific (the
+    stratified run found the ranking differs per query type), so a baked-in
+    order would ship one machine's ISP filtering to every user. Health is
+    learned locally at runtime and decays, so it adapts per install.
+
+    Returns [] when the registry is unavailable, in which case there is
+    nothing to fail over to and the original error propagates.
     """
     known = known_engines()
     if not known:
@@ -105,7 +131,13 @@ def _failover_chain(first):
     tried = {e.strip() for e in str(first or "").split(",") if e.strip()}
     if not tried:
         return []
-    return [e for e in known if e not in tried]
+    candidates = [e for e in known if e not in tried]
+    try:
+        from webget import health
+
+        return health.order(candidates)
+    except Exception:  # noqa: BLE001 - health is advisory, never load-bearing
+        return candidates
 
 
 class SearchError(RuntimeError):
@@ -136,6 +168,9 @@ def search_with_provenance(query, n=5, engine=None):
         failed_over- True when `engine` differs from `requested`
         tried      - every engine attempted, in order
         first_error- string form of the first failure, or None
+        health_ranked - True when the failover order came from learned health
+                        rather than registry order, so a caller debugging a
+                        surprising order knows where it came from
     """
     from ddgs import DDGS
 
@@ -145,11 +180,45 @@ def search_with_provenance(query, n=5, engine=None):
     tried = []
     first_error = None
 
+    def _record(label, ok, latency):
+        """Feed one outcome to the health ledger. Never load-bearing.
+
+        A comma-delimited request ("brave,duckduckgo") is recorded against each
+        named engine, not against the joined string. Recording the label as-is
+        created a ledger key called "brave,duckduckgo", which scores nothing:
+        the per-engine health used for ordering never saw the observation, and
+        a caller passing a subset silently built a parallel set of dead keys.
+        """
+        try:
+            from webget import health
+
+            if not label or label in ("auto", "all"):
+                return
+            for name in str(label).split(","):
+                name = name.strip()
+                if name:
+                    health.record(name, ok, latency)
+        except Exception:  # noqa: BLE001, S110 - health must never break a search
+            pass
+
     def _one(kw, label):
+        import time as _time
+
         tried.append(label)
+        t0 = _time.perf_counter()
+        try:
+            rows = list(DDGS().text(query, max_results=n, **kw))
+        except Exception:
+            # A raise is a data point too: this engine is unhealthy right now.
+            _record(label, False, _time.perf_counter() - t0)
+            raise
+        # An empty list counts as a failure for health purposes even though
+        # ddgs did not raise - several engines are blocked silently, and
+        # treating that as success would keep them ranked first.
+        _record(label, bool(rows), _time.perf_counter() - t0)
         return [
             {"title": r["title"], "url": r["href"], "snippet": r.get("body", "")}
-            for r in DDGS().text(query, max_results=n, **kw)
+            for r in rows
         ]
 
     def _prov(answered):
@@ -164,9 +233,24 @@ def search_with_provenance(query, n=5, engine=None):
             "failed_over": bool(alternates),
             "tried": list(tried),
             "first_error": str(first_error) if first_error is not None else None,
+            "health_ranked": _health_ranked,
         }
 
     label = backend if backend is not None else "auto"
+
+    # Decided BEFORE the first attempt, because provenance is built on the
+    # success path too. Defining this after the first try raised
+    # UnboundLocalError inside _prov, which the failover except swallowed: the
+    # search still returned results, but every call took the failover path and
+    # burned an extra engine. Silent, and on the most common path.
+    _health_ranked = False
+    try:
+        from webget import health as _health
+
+        _health_ranked = bool(_health.load())
+    except Exception:  # noqa: BLE001 - health is advisory
+        _health_ranked = False
+
     try:
         got = _one(kwargs, label)
         if got:
@@ -177,7 +261,22 @@ def search_with_provenance(query, n=5, engine=None):
     chain = _failover_chain(backend)
     if backend in (None, "auto"):
         chain = known_engines()
-    for alt in chain[:MAX_FAILOVER_ATTEMPTS]:
+
+    # Walk the chain until the time budget is spent, but never stop before
+    # MIN_FAILOVER_ATTEMPTS. `deadline` starts now rather than at the top of
+    # the function on purpose: the caller's requested engine already had its
+    # own chance, and charging that time to the failover budget would make a
+    # slow first attempt silently disable the safety net.
+    import time as _time
+
+    deadline = _time.monotonic() + _failover_budget()
+    attempted = 0
+    exhausted = False
+    for alt in chain:
+        if attempted >= MIN_FAILOVER_ATTEMPTS and _time.monotonic() >= deadline:
+            exhausted = True
+            break
+        attempted += 1
         try:
             got = _one({"backend": alt}, alt)
         except Exception as e:  # noqa: BLE001 - try the next engine
@@ -188,9 +287,23 @@ def search_with_provenance(query, n=5, engine=None):
             _warn(f"engine '{label}' failed ({first_error or 'no results'}); fell back to '{alt}'")
             return got, _prov(alt)
 
+    if exhausted:
+        # Say so, rather than letting a budget-limited failure look like
+        # "every engine is dead". They are different problems.
+        _warn(
+            f"failover budget of {_failover_budget():.0f}s exhausted after "
+            f"{attempted} engine(s); {len(chain) - attempted} untried"
+        )
+
     if first_error is not None:
-        raise SearchError(str(first_error), provenance=_prov(None))
-    return [], _prov(None)
+        prov = _prov(None)
+        prov["budget_exhausted"] = exhausted
+        prov["untried"] = max(0, len(chain) - attempted)
+        raise SearchError(str(first_error), provenance=prov)
+    prov = _prov(None)
+    prov["budget_exhausted"] = exhausted
+    prov["untried"] = max(0, len(chain) - attempted)
+    return [], prov
 
 
 def search(query, n=5, engine=None):

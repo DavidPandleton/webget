@@ -20,6 +20,25 @@ def server():
     srv.stop()
 
 
+def tool_failed(result):
+    """True when an MCP CallToolResult reports an error, across SDK versions.
+
+    The MCP SDK renamed CallToolResult.isError to is_error in the 2.x line:
+    fastmcp 3.x pulls mcp 1.x (isError only) and fastmcp 4.x pulls mcp 2.x
+    (is_error only). Reading either name directly pins the suite to one SDK,
+    so this reads whichever exists. Getting this wrong is not subtle - 20
+    tests fail on the other version - which is why it lives in one place
+    instead of in each test file.
+    """
+    for attr in ("is_error", "isError"):
+        val = getattr(result, attr, None)
+        if val is not None:
+            return bool(val)
+    raise AssertionError(
+        f"MCP CallToolResult exposes neither is_error nor isError: {type(result)!r}"
+    )
+
+
 @pytest.fixture()
 def isolated_env(tmp_path, monkeypatch):
     """Point cache + profile dirs at tmp_path and clear FIRECRAWL key."""

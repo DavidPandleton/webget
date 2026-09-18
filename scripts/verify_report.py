@@ -10,7 +10,6 @@ The suite cannot be run in one pass: MCP test files import webget_mcp, which
 exits when fastmcp is missing. CI splits it into two jobs, and so does this.
 """
 
-import ast
 import json
 import re
 import subprocess
@@ -61,7 +60,7 @@ def collect_count(ignore, python=PY_FULL):
          "-p", "no:cacheprovider", *args],
         cwd=ROOT, capture_output=True, text=True,
     )
-    return sum(int(n) for n in re.findall(r"^tests/\S+\.py: (\d+)$", r.stdout, re.M))
+    return sum(int(n) for n in re.findall(r"^tests/\S+\.py: (\d+)$", r.stdout, re.MULTILINE))
 
 
 def mcp_count():
@@ -71,7 +70,7 @@ def mcp_count():
          "-p", "no:cacheprovider"],
         cwd=ROOT, capture_output=True, text=True,
     )
-    return sum(int(x) for x in re.findall(r"^tests/\S+\.py: (\d+)$", r.stdout, re.M))
+    return sum(int(x) for x in re.findall(r"^tests/\S+\.py: (\d+)$", r.stdout, re.MULTILINE))
 
 
 total = collect_count(MCP_FILES + IGNORE_EXTRA) + mcp_count()
@@ -130,7 +129,7 @@ bad = 0
 for label, claimed, actual, ok in checks:
     if not ok:
         bad += 1
-    print(f"{label:34s} {str(claimed):>10s} {str(actual):>34s}  {'OK' if ok else 'FAIL'}")
+    print(f"{label:34s} {claimed!s:>10s} {actual!s:>34s}  {'OK' if ok else 'FAIL'}")
 print("-" * 84)
 print(f"{len(checks) - bad}/{len(checks)} claims verified"
       + ("" if not bad else f"  ({bad} FAILED)"))

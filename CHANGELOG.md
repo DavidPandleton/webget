@@ -3,6 +3,23 @@
 All notable changes to webget are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Learned engine health for failover ordering (`webget/health.py`). Every search observation (which engine answered, how fast) folds into a per-install ledger at `~/.local/state/webget/engine_health.json` (override: `WEBGET_ENGINE_HEALTH`). When the requested engine fails, alternates are tried best-first by learned score instead of registry order. The ledger is advisory - it reorders candidates, never removes them - and it decays: entries older than 7 days score as unseen, because the blocking that made an engine dead is exactly what changes. Latency is penalized via EWMA (cap 8s, weight 0.25), so a reliable-but-glacial engine ranks below a fast one. There is no baked-in ranking in the source: the same install learns a different order on different networks. Diagnostics: `health.health_snapshot()`.
+- Time-budgeted failover (`FAILOVER_BUDGET_S = 15.0`, env `WEBGET_FAILOVER_BUDGET_S`), replacing the fixed 3-attempt cap. A count is a bad proxy for "enough": 3 x 20s timeouts is a minute of dead air, while 8 fast engines finish in 3s and a live engine fifth in line never got reached. At least `MIN_FAILOVER_ATTEMPTS = 2` alternates are always tried regardless of the clock, and the budget starts after the requested engine's own attempt, so one slow first call cannot silently disable the safety net. Provenance gains `budget_exhausted` and `untried` so a budget-limited failure is distinguishable from "every engine is dead"; budget exhaustion is announced on stderr.
+- Provenance gains `health_ranked`: True when the failover order came from the learned ledger rather than registry order.
+
+### Fixed
+- `search_with_provenance` crashed with UnboundLocalError on every successful first-engine call (the `_health_ranked` variable was defined after `_prov` could read it), and the failure was swallowed by failover, so every search silently burned a second engine call. Found by driving the installed artifact, not by the suite.
+- The CLI's user-facing help did not document `--engine` or most options: the module docstring carrying them was overwritten by a shorter `__doc__ = (...)` assignment further down the file, so the option documentation written for 0.13.0 was invisible for the entire release line. The dead docstring is gone; the live one now documents all options. `webget s --help` previously ran a search for the word "help" instead of showing usage - `--help` is now honoured after subcommands.
+- MCP tests pinned one MCP SDK spelling: `CallToolResult.isError` (mcp 1.x / fastmcp 3.x) vs `is_error` (mcp 2.x / fastmcp 4.x). A `tool_failed()` helper in conftest reads whichever exists, and the suite now passes on both fastmcp 3.4.7 and 4.0.5. `mcp` extra floor raised to `fastmcp>=4` for installs (the code path never used the old name; only the tests did).
+- Test isolation: the search fixtures wrote real engine-health observations into the user's `~/.local/state` and read whatever the previous run left there, making outcomes depend on disk state outside the repo (the same suite passed and failed on an unchanged tree). The ledger path is now redirected per-test. Multi-engine labels like `brave,duckduckgo` are recorded against each named engine instead of being stored as one dead ledger key.
+
+### Changed
+- CI reshaped: `test` (offline unit, 3 Python versions, plus a socket-blocked run proving no test touches the network), `mcp-test` (offline MCP surface), `network` (non-gating, runs the `live_network`-marked tests and the stratified engine benchmark), `artifact` (installs the built wheel in a clean venv and runs `scripts/artifact_smoke.py` against it - the check that catches the bugs above, which are invisible to source-tree tests), and `build` (sdist/wheel + twine check). Tests that genuinely reach the public internet carry a `live_network` marker (verified empirically by blocking sockets except localhost; exactly three tests failed without a network and they are the three marked).
+- New tooling: `scripts/bench_engines_stratified.py` (102 queries across 8 strata - docs/code/news/commerce/science/local plus Tranco head/tail - with per-stratum success rates, top-1 accuracy where ground truth exists, and cross-engine agreement; the old 8-query benchmark could not support the reliability claims made from it), `scripts/classify_tests.py` (empirical network-dependence classification), `scripts/find_live_tests.py` (MCP live-test detection), and `scripts/artifact_smoke.py` (installed-artifact smoke test; non-gating online checks are separated from gating offline ones).
+
 ## [0.13.0] - 2026-09-18
 
 ### Added

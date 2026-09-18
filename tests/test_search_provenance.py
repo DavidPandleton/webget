@@ -47,10 +47,12 @@ def _results(*titles):
 
 
 @pytest.fixture
-def fake(monkeypatch):
+def fake(monkeypatch, tmp_path):
     FakeDDGS.script = {}
     FakeDDGS.calls = []
     monkeypatch.setattr("ddgs.DDGS", FakeDDGS)
+    # Isolate the engine-health ledger; see the note in test_search_failover.
+    monkeypatch.setenv("WEBGET_ENGINE_HEALTH", str(tmp_path / "engine_health.json"))
     return FakeDDGS
 
 

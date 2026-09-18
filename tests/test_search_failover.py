@@ -20,12 +20,18 @@ These run against a fake DDGS so they are deterministic and offline.
 
 from __future__ import annotations
 
+# NOTE: `import webget.search as sm` does NOT give the module here - the
+# package re-exports the `search` function, so the name resolves to a function
+# and attribute access like search_mod.FAILOVER_BUDGET_S raises AttributeError. Use
+# importlib when the module itself is needed.
+import importlib as _importlib
 from typing import ClassVar
 
 import pytest
 
-import webget.search as search_mod  # noqa: F401 - module, used for known_engines
-from webget.search import MAX_FAILOVER_ATTEMPTS, known_engines, search
+from webget.search import known_engines, search
+
+search_mod = _importlib.import_module("webget.search")
 
 
 class FakeDDGS:
@@ -54,10 +60,17 @@ def _results(*titles):
 
 
 @pytest.fixture
-def fake(monkeypatch):
+def fake(monkeypatch, tmp_path):
     FakeDDGS.script = {}
     FakeDDGS.calls = []
     monkeypatch.setattr("ddgs.DDGS", FakeDDGS)
+    # Isolate the engine-health ledger. Without this the tests write real
+    # observations into ~/.local/state/webget/engine_health.json, and because
+    # the ledger reorders the failover chain, test outcomes start depending on
+    # whatever the last run left behind: the same suite passed and failed on
+    # an unchanged tree. Tests must not mutate user state, and they must not
+    # read it either.
+    monkeypatch.setenv("WEBGET_ENGINE_HEALTH", str(tmp_path / "engine_health.json"))
     return FakeDDGS
 
 
@@ -150,18 +163,85 @@ class TestFailoverIsBounded:
     """Failover must not turn one slow query into N*timeout.
 
     An agent calling search in a loop cannot afford an unbounded chain of
-    dead engines. The chain is capped so worst-case latency stays close to
-    the single-engine case.
+    dead engines. The bound is a TIME budget, not a count of attempts: a count
+    is either too many (3 x 20s timeout = 60s) or too few (the working engine
+    sat at position 5). These tests pin the time semantics down.
     """
 
-    def test_chain_is_capped(self, fake):
-        # Every engine raises. Count how many were actually attempted.
+    def test_chain_is_capped_by_attempts_when_engines_are_instant(self, fake):
+        # Every engine raises, and instantly. The time budget will not expire,
+        # so this must terminate because the chain ran out, not loop forever.
         for eng in known_engines():
             fake.script[eng] = ("err", "down")
         with pytest.raises(RuntimeError):
             search("q", engine="brave")
-        # 1 (the requested engine) + the cap, never the whole registry.
-        assert len(fake.calls) <= MAX_FAILOVER_ATTEMPTS + 1
+        # The requested engine plus at most one pass over the registry.
+        assert 1 <= len(fake.calls) <= len(known_engines()) + 1
 
-    def test_cap_constant_is_small(self):
-        assert 1 <= MAX_FAILOVER_ATTEMPTS <= 4
+    def test_deadline_stops_the_walk(self, fake, monkeypatch):
+        """With a zero budget, only MIN_FAILOVER_ATTEMPTS alternates are tried.
+
+        A budget of 0 combined with instant failures isolates the deadline
+        logic from network timing: if the deadline were ignored, the walk
+        would continue through all 8 remaining engines.
+        """
+        monkeypatch.setenv("WEBGET_FAILOVER_BUDGET_S", "0")
+        for eng in known_engines():
+            fake.script[eng] = ("err", "down")
+        with pytest.raises(RuntimeError) as ei:
+            search("q", engine="brave")
+        # requested + minimum alternates, and nowhere near the full registry.
+        assert len(fake.calls) == 1 + search_mod.MIN_FAILOVER_ATTEMPTS
+        assert ei.value.provenance["budget_exhausted"] is True
+        assert ei.value.provenance["untried"] > 0
+
+    def test_reaches_an_engine_past_the_old_count_cap(self, fake):
+        """The bug this replaced: a working engine at position 5 was unreachable.
+
+        With a fixed cap of 3 alternates, only positions 1-3 were ever tried.
+        A time budget makes the reach depend on how fast the dead ones fail,
+        not on an arbitrary number.
+        """
+        engines = known_engines()
+        alive = engines[4]  # the fifth alternate
+        for eng in engines:
+            fake.script[eng] = ("err", "down")
+        fake.script[alive] = ("ok", _results("alive"))
+        out = search("q", engine=engines[0])
+        assert out and out[0]["url"] == "https://alive.example/"
+        assert alive in fake.calls
+
+    def test_budget_starts_after_the_requested_engine(self, fake, monkeypatch):
+        """A slow first attempt must not consume the failover budget.
+
+        If the deadline included the requested engine's own call, one slow
+        engine would leave the chain unbudgeted and silently disable the
+        safety net. With a tiny budget and a first engine that overruns it,
+        failover must still reach a working alternate.
+        """
+        import time as _t
+
+        calls = []
+
+        class SlowFirst:
+            def __init__(self, *a, **kw):
+                pass
+
+            def text(self, query, max_results=5, **kw):
+                backend = kw.get("backend")
+                calls.append(backend)
+                if backend == "brave":
+                    _t.sleep(0.4)  # overruns the 0.2s budget below
+                    raise RuntimeError("slow first engine")
+                return _results("z")
+
+        monkeypatch.setenv("WEBGET_FAILOVER_BUDGET_S", "0.2")
+        monkeypatch.setattr("ddgs.DDGS", SlowFirst)
+
+        out = search("q", engine="brave")
+        assert out and out[0]["url"] == "https://z.example/"
+        assert calls[0] == "brave" and len(calls) >= 2
+
+    def test_budget_constant_is_sane(self):
+        assert 1.0 <= search_mod.FAILOVER_BUDGET_S <= 30.0
+        assert 1 <= search_mod.MIN_FAILOVER_ATTEMPTS <= 3

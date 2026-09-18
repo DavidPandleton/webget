@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 MCP = ROOT / "webget_mcp.py"
 sys.path.insert(0, str(ROOT))
 
+from tests.conftest import tool_failed
 from tests.http_server import TestServer
 
 
@@ -79,7 +80,7 @@ def test_mcp_fetch_with_profile_uses_session(tmp_path):
         ok, anon = asyncio.run(asyncio.wait_for(run(), timeout=60))
         ok_text = ok.content[0].text if ok.content else ""
         anon_text = anon.content[0].text if anon.content else ""
-        assert not ok.isError, ok_text
+        assert not tool_failed(ok), ok_text
         assert '"status":"success"' in ok_text, ok_text
         assert "you are authenticated" in ok_text, ok_text
         assert '"authenticated":true' in ok_text, ok_text  # session was used
@@ -105,7 +106,7 @@ def test_mcp_fetch_unknown_profile_is_hard_error(tmp_path):
             return res
 
     res = asyncio.run(asyncio.wait_for(run(), timeout=60))
-    assert not res.isError
+    assert not tool_failed(res)
     assert "profile 'ghost' not found" in res.content[0].text
 
 
@@ -150,7 +151,7 @@ def test_mcp_fetch_enriched_output_present(tmp_path):
         anon_text = anon.content[0].text if anon.content else ""
 
         # Authenticated: standard assertions
-        assert not ok.isError, ok_text
+        assert not tool_failed(ok), ok_text
         assert '"status":"success"' in ok_text
         # auth
         assert '"auth"' in ok_text

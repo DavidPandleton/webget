@@ -36,8 +36,14 @@ Changelog = "https://github.com/DavidPandleton/webget/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 browser = ["crawl4ai>=0.9"]
-mcp = ["fastmcp>=2"]
-dev = ["pytest>=8", "ruff>=0.6"]
+# fastmcp pulls in the `mcp` SDK. The MCP SDK renamed CallToolResult.isError to
+# is_error in the 2.x line, and fastmcp 4.x ships that newer SDK. The code and
+# tests here use is_error, so the floor is the version that has it.
+# Without a floor, an install could resolve to a fastmcp whose result objects
+# expose isError only, and the MCP surface would look broken for a reason that
+# has nothing to do with webget.
+mcp = ["fastmcp>=4"]
+dev = ["pytest>=8", "ruff>=0.6", "pytest-timeout>=2", "pytest-socket>=0.7"]
 
 [project.scripts]
 webget = "webget.cli:main"
@@ -50,7 +56,22 @@ packages = ["webget"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  # Tests that reach the PUBLIC internet (not the local test server). They are
+  # excluded from offline jobs with -m "not live_network" and run separately,
+  # because engine reachability is a property of the runner's network: during
+  # 0.13.0, DuckDuckGo was unreachable from the author's ISP while Google,
+  # Brave and Yandex answered in under a second. A red test here does not mean
+  # the release is broken.
+  "live_network: test reaches the public internet; excluded from offline CI",
+]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint.per-file-ignores]
+# Ops scripts drive subprocesses and inspect returncode manually; requiring
+# check=True everywhere would force try/except noise where a plain if already
+# handles the failure.
+"scripts/*" = ["PLW1510"]

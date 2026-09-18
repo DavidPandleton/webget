@@ -10,6 +10,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -40,7 +41,16 @@ async def _main():
         assert payload.get("method") == "http"
 
 
+@pytest.mark.live_network
 def test_mcp_smoke():
+    """Smoke test: drive webget_mcp.py over stdio like an MCP client would.
+
+    The search leg talks to the real engines (the "network-light" note below
+    was optimistic: with every engine blocked the tool returns an error
+    payload and the shape assertions still parse JSON that is not there), so
+    the whole test is live_network and the offline shape contract lives in
+    test_mcp_provenance instead.
+    """
     asyncio.run(asyncio.wait_for(_main(), timeout=60))
 
 

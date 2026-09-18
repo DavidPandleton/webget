@@ -10,6 +10,8 @@ import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from tests.conftest import tool_failed
+
 ROOT = Path(__file__).resolve().parent.parent
 MCP = ROOT / "webget_mcp.py"
 
@@ -64,7 +66,7 @@ class TestNoSecretLeakage:
                 return res
 
         res = _run(run())
-        if res.isError:
+        if tool_failed(res):
             return  # error path: no payload to leak, still fine
         text = res.content[0].text
         hits = _scan(text)
@@ -84,7 +86,12 @@ class TestNoSecretLeakage:
         assert "Traceback" not in text
         assert "webget_cli.py" not in text
 
+    @pytest.mark.live_network
     def test_search_fetch_shape_complete(self):
+        """Hits the real engine path: duckduckgo upstream was unreachable from
+        the author's network, so this is live_network and excluded offline.
+        The shape assertions it makes are covered offline by test_mcp_provenance
+        with mocked searches."""
         async def run():
             params = StdioServerParameters(command=sys.executable, args=[str(MCP)])
             async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
@@ -122,7 +129,7 @@ class TestServerRecovery:
                 bad = await session.call_tool(
                     "fetch", {"url": "https://example.com", "strategy": "bogus"}
                 )
-                assert not bad.isError or "error" in bad.content[0].text
+                assert not tool_failed(bad) or "error" in bad.content[0].text
                 good = await session.call_tool(
                     "fetch", {"url": "https://example.com", "strategy": "http", "no_cache": True}
                 )

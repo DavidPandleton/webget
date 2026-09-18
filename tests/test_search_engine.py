@@ -34,6 +34,16 @@ class FakeDDGS:
 def _patch_ddgs(monkeypatch):
     FakeDDGS.captured = {}
     monkeypatch.setattr("ddgs.DDGS", FakeDDGS)
+    # Keep the engine-health ledger out of the user's state dir. Tests that
+    # exercise search() record real observations otherwise, and since the
+    # ledger reorders failover, a run would depend on the previous run's file.
+    import tempfile
+    from pathlib import Path
+
+    monkeypatch.setenv(
+        "WEBGET_ENGINE_HEALTH",
+        str(Path(tempfile.mkdtemp()) / "engine_health.json"),
+    )
 
 
 class TestSearchEngineValidation:

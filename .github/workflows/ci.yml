@@ -7,6 +7,22 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Job layout, and why it is shaped this way:
+#
+#   test        offline unit tests on 3 Python versions. Must be green for a
+#               release and must never depend on the public internet.
+#   mcp-test    the MCP surface, offline. Needs the mcp extra.
+#   network     tests that reach the public internet. allowed to fail: engine
+#               blocking is a property of the runner's network, not of the
+#               code, and a red X here must not read as a broken release.
+#   artifact    installs the BUILT wheel and runs scripts/artifact_smoke.py,
+#               which exercises the real CLI instead of monkeypatched
+#               internals. This job exists because two 0.13.0 bugs (a wrong
+#               failed_over, and ruff deleting a provenance import) passed
+#               every test above and were only visible from the installed
+#               artifact.
+#   build       builds sdist + wheel and checks the metadata.
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -20,25 +36,47 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install package + dev tools
-        # Core runtime deps (ddgs/httpx/trafilatura/html2text) come from
-        # `pip install -e .`; adversarial/integration tests exercise real
-        # fetch paths, so they need httpx at collection+run time.
         run: |
           python -m pip install --upgrade pip
-          pip install -e . pytest ruff
+          pip install -e ".[dev]"
       - name: Lint
-        run: ruff check webget/ webget_cli.py webget_mcp.py tests
-      - name: Test
-        # MCP tests need the mcp SDK: run in the dedicated mcp-test job.
-        # test_adversarial_mcp.py / test_mcp_leak_review.py / test_mcp_profile.py / test_mcp_map.py
-        # also import mcp at collection time, so they are scoped out here too.
-        # test_login_flow.py also imports mcp (for the stdio client), so it
-        # runs in mcp-test; that job installs playwright for the browser path.
-        # test_mcp_metadata.py imports webget_mcp (fastmcp) at call time, so it
-        # runs in mcp-test as well.
-        # test_mcp_engine.py imports webget_mcp at collection time (same rule).
-        # test_mcp_provenance.py does too, so it belongs in mcp-test.
-        run: pytest --ignore=tests/test_mcp_server.py --ignore=tests/test_mcp_smoke.py --ignore=tests/test_adversarial_mcp.py --ignore=tests/test_mcp_leak_review.py --ignore=tests/test_mcp_profile.py --ignore=tests/test_login_flow.py --ignore=tests/test_mcp_map.py --ignore=tests/test_mcp_metadata.py --ignore=tests/test_browser_ssrf.py --ignore=tests/test_mcp_engine.py --ignore=tests/test_mcp_provenance.py
+        run: ruff check webget/ webget_cli.py webget_mcp.py tests scripts
+      - name: Unit tests (offline, no MCP)
+        # These files import webget_mcp, which needs fastmcp; they run in
+        # mcp-test. test_browser_ssrf needs playwright and runs in mcp-test
+        # too (that job installs it). Everything left here is offline: the
+        # suite was checked with sockets blocked, localhost excepted.
+        run: |
+          pytest -q \
+            --ignore=tests/test_mcp_server.py \
+            --ignore=tests/test_mcp_smoke.py \
+            --ignore=tests/test_adversarial_mcp.py \
+            --ignore=tests/test_mcp_leak_review.py \
+            --ignore=tests/test_mcp_profile.py \
+            --ignore=tests/test_login_flow.py \
+            --ignore=tests/test_mcp_map.py \
+            --ignore=tests/test_mcp_metadata.py \
+            --ignore=tests/test_browser_ssrf.py \
+            --ignore=tests/test_mcp_engine.py \
+            --ignore=tests/test_mcp_provenance.py
+      - name: Assert the offline suite touches no network
+        # A guard, not a test: if a future test reaches out, it fails here
+        # with a clear message instead of flaking in CI months later.
+        run: |
+          pip install pytest-socket
+          pytest -q --disable-socket \
+            --allow-hosts=127.0.0.1,localhost,::1 \
+            --ignore=tests/test_mcp_server.py \
+            --ignore=tests/test_mcp_smoke.py \
+            --ignore=tests/test_adversarial_mcp.py \
+            --ignore=tests/test_mcp_leak_review.py \
+            --ignore=tests/test_mcp_profile.py \
+            --ignore=tests/test_login_flow.py \
+            --ignore=tests/test_mcp_map.py \
+            --ignore=tests/test_mcp_metadata.py \
+            --ignore=tests/test_browser_ssrf.py \
+            --ignore=tests/test_mcp_engine.py \
+            --ignore=tests/test_mcp_provenance.py
 
   mcp-test:
     runs-on: ubuntu-latest
@@ -49,17 +87,52 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install with MCP extra + playwright
-        # test_login_flow.py exercises a real Chromium via playwright AND
-        # the MCP stdio client, so this job owns both deps.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[mcp]"
-          pip install pytest playwright
+          pip install -e ".[mcp,dev]"
+          pip install playwright
           python -m playwright install chromium --with-deps
-      - name: MCP + browser login flow tests
-        run: pytest tests/test_mcp_server.py tests/test_mcp_smoke.py tests/test_adversarial_mcp.py tests/test_mcp_leak_review.py tests/test_mcp_profile.py tests/test_login_flow.py tests/test_mcp_map.py tests/test_mcp_metadata.py tests/test_mcp_engine.py tests/test_mcp_provenance.py -q
+      - name: MCP + browser tests (offline)
+        # -m "not live_network": the one test that talks to the public
+        # internet (test_search_output_shape) runs in the network job instead.
+        # Verified empirically: with sockets blocked except localhost, the
+        # MCP suite passes except for that single test.
+        run: |
+          pytest tests/test_mcp_server.py tests/test_mcp_smoke.py \
+            tests/test_adversarial_mcp.py tests/test_mcp_leak_review.py \
+            tests/test_mcp_profile.py tests/test_login_flow.py \
+            tests/test_mcp_map.py tests/test_mcp_metadata.py \
+            tests/test_mcp_engine.py tests/test_mcp_provenance.py \
+            -m "not live_network" -q
 
-  smoke:
+  network:
+    runs-on: ubuntu-latest
+    needs: test
+    # NOT gating. Engine reachability is a property of the runner's egress:
+    # during the 0.13.0 work, 7 of 9 engines were blocked from the author's
+    # network while the same tests passed from CI. A failure here is
+    # information about the network, not a verdict on the code.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[mcp,dev]"
+      - name: Live-network tests (the marker is the contract)
+        # Runs ONLY tests marked live_network. continue-on-error on the job
+        # means a blocked runner shows a warning, not a red X.
+        run: pytest tests/ -m "live_network" -q --timeout=300
+      - name: Live engine benchmark (informational)
+        run: |
+          python scripts/bench_engines_stratified.py --quick \
+            --out /tmp/engines_ci.json || true
+          cat /tmp/engines_ci.json 2>/dev/null | head -40 || true
+
+  artifact:
     runs-on: ubuntu-latest
     needs: test
     steps:
@@ -67,12 +140,43 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install package (pulls runtime deps from pyproject)
+      - name: Build wheel and sdist
         run: |
-          python -m pip install --upgrade pip
-          pip install .
-      - name: Smoke test
+          python -m pip install --upgrade pip build
+          python -m build
+      - name: Install the WHEEL (not the source tree)
         run: |
-          webget --help | head -20
-          python -c "import webget_cli; print('import ok')"
-          webget s "test" --limit 3 | head -4
+          python -m venv /tmp/inst
+          /tmp/inst/bin/pip install --upgrade pip
+          /tmp/inst/bin/pip install dist/*.whl
+      - name: Artifact smoke test
+        # Run from /tmp so `import webget` cannot resolve to the checkout,
+        # which would silently turn this into a source-tree test.
+        working-directory: /tmp
+        run: |
+          /tmp/inst/bin/python $GITHUB_WORKSPACE/scripts/artifact_smoke.py
+      - name: Artifact smoke test with MCP extra
+        working-directory: /tmp
+        run: |
+          /tmp/inst/bin/pip install "fastmcp>=4"
+          /tmp/inst/bin/python -c "import webget_mcp; print('webget_mcp imports')"
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+      - name: Validate metadata
+        run: twine check dist/*

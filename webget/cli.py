@@ -1,44 +1,9 @@
-"""CLI entry point: argparse + command dispatch.
+"""CLI entry point: option parsing and command dispatch.
 
-Usage (from --help):
-  webget s "query" [n]           Search the web via ddgs metasearch (default 5)
-  webget u "https://..."         Scrape URL -> markdown (HTTP fast path, falls back)
-  webget su "query" [n]          Search + scrape top n results (default 3, parallel)
-  webget s "q" | webget u -      Pipe: pass URL from search via stdin
-                                 (multi-line stdin = batch scrape)
-  webget login URL --profile X   Open browser, log in manually, persist session
-  webget profiles [--json]       List profiles and session status
-  webget logout URL --profile X  Clear auth for one domain, keep the rest
-  webget map URL [--limit N]     Discover URLs via sitemaps and robots.txt
-Aliases: search = s, fetch = u, search-fetch = su
-
-Options:
-  -c, --cookies FILE  Netscape-format cookie file (like curl -b)
-  --profile NAME      Persistent browser profile (auth session) in
-                      ~/.local/share/webget/profiles/<name>
-  -H, --header "K: V" Extra header (repeatable)
-  -n, --max-chars N   Max output chars (default: 10000 for u, 4000 for su)
-  --limit N           Result count for s/su (default: 5 / 3)
-  -t, --timeout N     Per-URL timeout in seconds (default: 20)
-  -e, --engine NAMES  Search engines (ddgs metasearch): auto or a
-                      comma-delimited subset like brave,duckduckgo.
-                      Unknown names degrade to auto. A dead engine
-                      falls over to others automatically (default: auto)
-  --json              Output results as JSON (with --engine provenance)
-  --fresh             Bypass cache and re-scrape
-  --ttl N             Cache TTL in seconds (default: 3600)
-  --strategy S        Fetch strategy: auto|http|crawl4ai|firecrawl (default auto)
-  --no-cache          Don't read or write the disk cache (private fetch)
-  --concurrency N     Max concurrent fetches for batch runs (default: 10)
-  --headless          Run login browser without a window (tests/automation)
-  --json              Output results as JSON with metadata
-                      (status/method/cached/auth)
-
-Status values: success | login_required | challenge | blocked | error
-
-Session management:
-  webget login never stores passwords and never fills forms. You log in
-  yourself in the opened browser window; webget just persists the session.
+The user-facing help text is assigned to __doc__ further down, after the
+imports. It used to live here as a module docstring and was then
+overwritten, so the options it documented (--engine among them) were
+invisible in --help for the whole 0.13.0 line.
 """
 
 from __future__ import annotations
@@ -75,6 +40,31 @@ __doc__ = (
     "  webget logout URL --profile X  Clear auth for one domain, keep the rest\n"
     "  webget map URL [--limit N]     Discover URLs via sitemaps and robots.txt\n"
     "Aliases: search = s, fetch = u, search-fetch = su\n"
+    "\n"
+    "Options:\n"
+    "  -c, --cookies FILE  Netscape-format cookie file\n"
+    "  --profile NAME      Persistent browser profile (auth session)\n"
+    '  -H, --header "K: V" Extra header (repeatable)\n'
+    "  -n, --max-chars N   Max output chars (default: 10000 for u, 4000 for su)\n"
+    "  --limit N           Result count for s/su (default: 5 / 3)\n"
+    "  -t, --timeout N     Per-URL timeout in seconds (default: 20)\n"
+    "  -e, --engine NAMES  Search engines (ddgs metasearch): auto, or a\n"
+    "                      comma-delimited subset like brave,duckduckgo.\n"
+    "                      Unknown names degrade to auto. A dead engine\n"
+    "                      falls over to others automatically (default: auto)\n"
+    "  --json              Output results as JSON (with --engine provenance)\n"
+    "  --fresh             Bypass cache and re-scrape\n"
+    "  --ttl N             Cache TTL in seconds (default: 3600)\n"
+    "  --strategy S        auto|http|crawl4ai|firecrawl (default auto)\n"
+    "  --no-cache          Don't read or write the disk cache (private fetch)\n"
+    "  --concurrency N     Max concurrent fetches for batch runs (default: 10)\n"
+    "  --headless          Run login browser without a window\n"
+    "\n"
+    "Status values: success | login_required | challenge | blocked | error\n"
+    "\n"
+    "Session management:\n"
+    "  webget login never stores passwords and never fills forms. You log in\n"
+    "  yourself in the opened browser window; webget just persists the session.\n"
 )
 
 
@@ -239,6 +229,17 @@ def cmd_logout(site, profile):
 def main():
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
+        print(__doc__)
+        return
+    # `webget s --help` used to be treated as the query "help": --help was only
+    # honoured in position 0, so there was no way to see usage for a
+    # subcommand and a user asking for help got search results instead. Found
+    # by scripts/artifact_smoke.py, not by the test suite.
+    if (
+        len(args) >= 2
+        and args[0] in ("s", "search", "su", "search-using", "fetch", "f", "u")
+        and args[1] in ("-h", "--help")
+    ):
         print(__doc__)
         return
 

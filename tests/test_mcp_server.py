@@ -11,6 +11,8 @@ from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from tests.conftest import tool_failed
+
 ROOT = Path(__file__).resolve().parent.parent
 MCP = ROOT / "webget_mcp.py"
 
@@ -53,7 +55,7 @@ def test_invalid_strategy_returns_error_not_crash():
             return res
 
     res = _run(run())
-    assert not res.isError
+    assert not tool_failed(res)
     assert "error" in res.content[0].text
 
 
@@ -72,7 +74,7 @@ def test_firecrawl_without_key_returns_error_not_crash():
             return res
 
     res = _run(run())
-    assert not res.isError
+    assert not tool_failed(res)
     assert "error" in res.content[0].text
 
 
@@ -95,7 +97,7 @@ def test_server_stays_alive_after_bad_calls():
             return res
 
     res = _run(run())
-    assert not res.isError
+    assert not tool_failed(res)
     assert "success" in res.content[0].text
 
 
@@ -118,7 +120,7 @@ def test_fetch_invalid_profile_returns_error_not_crash():
             return res, ok
 
     res, ok = _run(run())
-    assert not res.isError
+    assert not tool_failed(res)
     assert "invalid profile name" in res.content[0].text
     assert "success" in ok.content[0].text  # server alive after the bad call
 
@@ -139,7 +141,7 @@ def test_fetch_nonexistent_profile_returns_error():
             return res
 
     res = _run(run())
-    assert not res.isError
+    assert not tool_failed(res)
     assert "profile 'ghost' not found" in res.content[0].text
 
 
@@ -161,9 +163,9 @@ def test_search_fetch_invalid_profile_returns_error_not_crash():
             return res, ok
 
     res, ok = _run(run())
-    assert not res.isError
+    assert not tool_failed(res)
     assert "invalid profile name" in res.content[0].text
-    assert not ok.isError  # server alive after the bad call
+    assert not tool_failed(ok)  # server alive after the bad call
 
 
 def test_list_profiles_tool_metadata_only(tmp_path):
@@ -189,7 +191,7 @@ def test_list_profiles_tool_metadata_only(tmp_path):
             return res
 
     res = _run(run())
-    assert not res.isError
+    assert not tool_failed(res)
     text = res.content[0].text
     assert "sion" in text
     assert "SUPERSECRET" not in text  # cookie values never exposed

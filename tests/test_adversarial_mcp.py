@@ -10,6 +10,8 @@ import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from tests.conftest import tool_failed
+
 ROOT = Path(__file__).resolve().parent.parent
 MCP = ROOT / "webget_mcp.py"
 
@@ -58,7 +60,7 @@ class TestMalformedArguments:
                 return res
 
         res = _run(run())
-        assert res.isError
+        assert tool_failed(res)
 
 
 class TestInvalidURLs:
@@ -72,7 +74,7 @@ class TestInvalidURLs:
                 return res
 
         res = _run(run())
-        assert "error" in res.content[0].text or res.isError
+        assert "error" in res.content[0].text or tool_failed(res)
 
 
 class TestRepeatedCalls:
@@ -86,7 +88,7 @@ class TestRepeatedCalls:
                         "fetch",
                         {"url": "https://example.com", "strategy": "http", "no_cache": True},
                     )
-                    if res.isError:
+                    if tool_failed(res):
                         return "ERROR"
                 return "OK"
 
@@ -106,7 +108,7 @@ class TestRepeatedCalls:
                         for _ in range(5)
                     ]
                 )
-                return [r.isError for r in results]
+                return [tool_failed(r) for r in results]
 
         assert _run(run()) == [False] * 5
 
@@ -133,7 +135,7 @@ class TestInputCaps:
                 return res
 
         res = _run(run())
-        assert "must be between" in res.content[0].text or res.isError
+        assert "must be between" in res.content[0].text or tool_failed(res)
 
 
 class TestToolFailureIsolation:
@@ -171,8 +173,18 @@ class TestSSRFViaMCP:
         res = _run(run())
         assert "private" in res.content[0].text.lower()
 
+    @pytest.mark.live_network
     def test_search_output_shape(self):
-        """search must return {results: [...], engine: ...} with provenance."""
+        """search must return {results: [...], engine: ...} with provenance.
+
+        Marked live_network deliberately: this is the ONLY test in the suite
+        that talks to the public internet (verified by running the whole MCP
+        suite with sockets blocked except localhost - everything passes except
+        this one, which fails exactly because the network is unavailable). It
+        exercises the real engine path end-to-end through a real server
+        process, which no mock can replace, so it stays but is excluded from
+        the offline jobs.
+        """
 
         async def run():
             params = StdioServerParameters(command=sys.executable, args=[str(MCP)])

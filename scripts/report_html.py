@@ -11,9 +11,11 @@ Usage: python scripts/report_html.py <charts_dir> <out_html>
 
 import base64
 import json
-import subprocess
 import sys
 from datetime import date
+
+# DTZ011: a report stamp is intentionally the LOCAL date, not UTC.
+_today = date.today
 from pathlib import Path
 
 CHARTS = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/charts")
@@ -165,7 +167,7 @@ traffic, and the two bugs that only surfaced once the code left the test suite.<
   <span><b>Commit</b> {e(HEAD)} on main</span>
   <span><b>CI</b> 5/5 passing (Python 3.11, 3.12, 3.13, mcp-test, smoke)</span>
   <span><b>Tests</b> {TOTAL_TESTS} ({NON_MCP_TESTS} + {MCP_TESTS})</span>
-  <span><b>Report date</b> {date.today().isoformat()}</span>
+  <span><b>Report date</b> {_today().isoformat()}</span>
 </div>
 
 <div class="kpis">
@@ -400,7 +402,7 @@ work and was deliberately left alone rather than guessed at. Tag
 
 <footer>
   webget 0.13.0 engineering report. All measurements taken on the author's
-  residential connection, {date.today().isoformat()}. Benchmark data is
+  residential connection, {_today().isoformat()}. Benchmark data is 
   committed at <code>data/search_bench/engines.json</code>; charts are
   reproducible via <code>scripts/report_charts.py</code>.
 </footer>

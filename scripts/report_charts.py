@@ -17,8 +17,8 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib.ticker import PercentFormatter  # noqa: E402
+import matplotlib.pyplot as plt
+from matplotlib.ticker import PercentFormatter
 
 # A restrained palette; the report is a document, not a dashboard.
 INK = "#1a1a1a"
@@ -220,7 +220,7 @@ def chart_change_volume():
             buckets["tests"] += add
         elif path.endswith(".md"):
             buckets["docs"] += add
-        elif path.startswith("scripts/") or path.startswith(".github/"):
+        elif path.startswith(("scripts/", ".github/")):
             buckets["tooling"] += add
         else:
             buckets["implementation"] += add
