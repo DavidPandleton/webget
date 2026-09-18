@@ -3,7 +3,7 @@
 All notable changes to webget are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.14.0] - 2026-09-19
 
 ### Added
 - Learned engine health for failover ordering (`webget/health.py`). Every search observation (which engine answered, how fast) folds into a per-install ledger at `~/.local/state/webget/engine_health.json` (override: `WEBGET_ENGINE_HEALTH`). When the requested engine fails, alternates are tried best-first by learned score instead of registry order. The ledger is advisory - it reorders candidates, never removes them - and it decays: entries older than 7 days score as unseen, because the blocking that made an engine dead is exactly what changes. Latency is penalized via EWMA (cap 8s, weight 0.25), so a reliable-but-glacial engine ranks below a fast one. There is no baked-in ranking in the source: the same install learns a different order on different networks. Diagnostics: `health.health_snapshot()`.
