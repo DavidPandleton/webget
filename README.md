@@ -89,7 +89,9 @@ uv pip install -e ".[dev,browser]"
 ## Usage
 
 ```bash
-webget s "rust async runtime"             # search DuckDuckGo (top 5)
+webget s "rust async runtime"             # search (ddgs metasearch, top 5)
+webget s "rust async runtime" --engine brave,duckduckgo   # subset: faster than auto
+webget s "rust async runtime" --json      # machine-readable, includes engine provenance
 webget u https://example.com              # scrape (auto: http -> crawl4ai)
 webget su "llm inference" 5               # search + scrape top 5, parallel
 cat urls.txt | webget u -                 # batch scrape, one browser instance
@@ -97,6 +99,70 @@ webget fetch https://example.com --json   # machine-readable result
 ```
 
 Long aliases: `search` = `s`, `fetch` = `u`, `search-fetch` = `su`.
+
+## Search engines
+
+webget searches through `ddgs`, a metasearch library that aggregates several
+keyless engines. The default `auto` queries all of them; naming a subset is
+faster and skips engines that are having a bad hour.
+
+```bash
+webget s "query" --engine brave,duckduckgo
+```
+
+**Do not hardcode engine names.** The set ddgs offers changes between its
+releases, and webget validates against the registry at runtime rather than
+a built-in list. Pass a deliberately bogus name to see what your installed
+version supports:
+
+```bash
+$ webget s "query" --engine bogus
+warning: unknown search engine(s): bogus - using auto
+  (known: brave, duckduckgo, google, grokipedia, mojeek, startpage, wikipedia, yahoo)
+```
+
+Unknown names degrade to `auto` with a warning instead of failing, so a
+typo never kills a search.
+
+**Failover is automatic.** If the engine you named fails, or returns zero
+results, webget tries up to 3 further engines and returns the first
+non-empty set. This is not paranoia: engine reachability depends on where
+you are, not just whether a service is up. A benchmark from one residential
+connection found only 1 of 9 engines reachable, and `auto` survived purely
+because that one did.
+
+Every substitution is announced, never silent:
+
+```bash
+$ webget s "rust programming language book" --engine google
+warning: engine 'google' failed (No results found.); fell back to 'brave'
+1. The Rust Programming Language - doc.rust-lang.org/book/
+```
+
+**Results carry provenance.** Because failover can answer from an engine you
+did not ask for, `--json` reports which one actually did:
+
+```bash
+$ webget s "linux kernel" --engine google --json
+{
+  "results": [ ... ],
+  "engine": "grokipedia",         # who actually answered
+  "requested_engine": "google",
+  "failed_over": true
+}
+```
+
+This matters most over MCP, where a stderr warning is invisible to the
+agent: the payload is the only signal that the results came from elsewhere.
+
+> **MCP note (breaking in 0.13.0):** the `search` and `search_fetch` tools
+> now return an object `{results, engine, requested_engine, failed_over}`
+> instead of a bare list, so provenance has somewhere to live. Errors are
+> `{error, results: []}`.
+
+Provenance is per-call, not per-result: `ddgs` merges every engine's hits
+into one list and discards which engine supplied each hit, so per-hit
+attribution is not obtainable through its public API.
 
 ### Options
 

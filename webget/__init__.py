@@ -78,7 +78,7 @@ from .profile import (
     profile_exists,
     profile_state_path,
 )
-from .search import _read_json, _write_json, search
+from .search import _read_json, _write_json, search, search_with_provenance
 from .ssrf import (
     SSRFError,
     _guard_browser_routes,
@@ -155,4 +155,5 @@ __all__ = [
     "profile_state_path",
     "scrape_many",
     "search",
+    "search_with_provenance",
 ]

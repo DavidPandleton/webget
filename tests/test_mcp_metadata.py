@@ -23,11 +23,14 @@ class TestMcpMetadataExposure:
 
         monkeypatch.setattr(
             webget_mcp.wg,
-            "search",
-            lambda *a, **k: [{"title": "T", "url": fresh_cache.url("/long"), "snippet": "s"}],
+            "search_with_provenance",
+            lambda *a, **k: (
+                [{"title": "T", "url": fresh_cache.url("/long"), "snippet": "s"}],
+                {"requested": "auto", "engine": "brave", "failed_over": False},
+            ),
         )
         out = asyncio.run(webget_mcp.search_fetch("q", n=1, no_cache=True))
-        assert set(out[0]["metadata"]) == {
+        assert set(out["results"][0]["metadata"]) == {
             "author",
             "published_at",
             "site_name",

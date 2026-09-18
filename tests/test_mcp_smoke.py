@@ -1,7 +1,8 @@
 """Smoke test: drive webget_mcp.py over stdio like an MCP client would.
 
-Network-light: search results are asserted as a list (may be empty when
-DuckDuckGo is rate-limiting), fetch targets example.com over the http path.
+Network-light: search results may be empty when every engine is blocked, so
+the shape is asserted rather than the count. fetch targets example.com over
+the http path.
 """
 
 import asyncio
@@ -25,8 +26,10 @@ async def _main():
 
         res = await session.call_tool("search", {"query": "mcp server python", "n": 2})
         payload = json.loads(res.content[0].text)
-        print("SEARCH RESULTS:", len(payload))
-        assert isinstance(payload, list)
+        print("SEARCH engine:", payload.get("engine"), "| n:", len(payload.get("results", [])))
+        assert isinstance(payload, dict)
+        assert {"results", "engine", "requested_engine", "failed_over"} <= set(payload)
+        assert isinstance(payload["results"], list)
 
         res = await session.call_tool(
             "fetch", {"url": "https://example.com", "strategy": "http", "no_cache": True}
