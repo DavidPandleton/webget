@@ -71,17 +71,39 @@ def _validate_profile(profile):
 
 
 @mcp.tool()
-async def search(query: str, n: int = 5, engine: str | None = None) -> list[dict]:
-    """Search the web via the ddgs metasearch. Returns up to n results with
-    title/url/snippet.
+async def search(query: str, n: int = 5, engine: str | None = None) -> dict:
+    """Search the web via the ddgs metasearch.
+
+    Returns {"results": [...], "engine": ..., "requested_engine": ...,
+    "failed_over": bool}. Each result has title/url/snippet.
 
     engine: None/auto = all engines (ddgs default), or a comma-delimited
     subset like "brave,duckduckgo". Unknown names degrade to auto.
+
+    "engine" is the engine that ACTUALLY answered. It can differ from
+    "requested_engine" when the requested one failed and webget fell over
+    to another; check "failed_over". This matters for agents: the stderr
+    warning is invisible over MCP, so this field is the only signal.
     """
     err = _clamp("n", n, 1, _MAX_SEARCH_N)
     if err:
-        return [{"error": err}]
-    return await asyncio.to_thread(wg.search, query, n, engine)
+        return {"error": err, "results": []}
+    prov_fn = getattr(wg, "search_with_provenance", None)
+    if prov_fn is not None:
+        results, prov = await asyncio.to_thread(prov_fn, query, n, engine)
+    else:  # older shim without provenance support
+        results = await asyncio.to_thread(wg.search, query, n, engine)
+        prov = {
+            "requested": engine or "auto",
+            "engine": engine or "auto",
+            "failed_over": False,
+        }
+    return {
+        "results": results,
+        "engine": prov.get("engine"),
+        "requested_engine": prov.get("requested"),
+        "failed_over": prov.get("failed_over", False),
+    }
 
 
 @mcp.tool()
@@ -195,11 +217,12 @@ async def search_fetch(
     no_cache: bool = False,
     profile: str | None = None,
     engine: str | None = None,
-) -> list[dict]:
+) -> dict:
     """Search the web, then scrape the top n results in parallel.
 
-    Returns one entry per URL with rank, search snippet, and scrape result
-    (status/method/markdown).
+    Returns {"results": [...], "engine": ..., "requested_engine": ...,
+    "failed_over": bool}. Each result entry has rank, search snippet, and
+    scrape result (status/method/markdown).
 
     profile: name of a locally stored login session (created with
     'webget login URL --profile NAME'). Invalid names and unknown
@@ -214,12 +237,21 @@ async def search_fetch(
     ):
         err = _clamp(name, value, lo, hi)
         if err:
-            return [{"error": err}]
+            return {"error": err, "results": []}
     if profile is not None:
         err = _validate_profile(profile)
         if err:
-            return [{"error": err}]
-    results = await asyncio.to_thread(wg.search, query, n, engine)
+            return {"error": err, "results": []}
+    prov_fn = getattr(wg, "search_with_provenance", None)
+    if prov_fn is not None:
+        results, prov = await asyncio.to_thread(prov_fn, query, n, engine)
+    else:
+        results = await asyncio.to_thread(wg.search, query, n, engine)
+        prov = {
+            "requested": engine or "auto",
+            "engine": engine or "auto",
+            "failed_over": False,
+        }
     urls = [r["url"] for r in results]
     scraped = await wg.scrape_many(
         urls,
@@ -248,7 +280,12 @@ async def search_fetch(
                 "reasons": got.get("reasons"),
             }
         )
-    return out
+    return {
+        "results": out,
+        "engine": prov.get("engine"),
+        "requested_engine": prov.get("requested"),
+        "failed_over": prov.get("failed_over", False),
+    }
 
 
 @mcp.tool()

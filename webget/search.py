@@ -108,6 +108,91 @@ def _failover_chain(first):
     return [e for e in known if e not in tried]
 
 
+class SearchError(RuntimeError):
+    """Search failed on every engine, with provenance attached.
+
+    Carries `.provenance` so a caller catching this still learns which
+    engines were tried and why the first one failed, instead of only
+    getting a bare message.
+    """
+
+    def __init__(self, message, provenance=None):
+        super().__init__(message)
+        self.provenance = provenance or {}
+
+
+def search_with_provenance(query, n=5, engine=None):
+    """Search and return ``(results, provenance)``.
+
+    Provenance is per-CALL, not per-result, because ddgs merges every
+    engine's hits into one list before returning (ddgs/results.py:
+    TextResult carries only title/href/body, so the originating engine is
+    discarded upstream). Per-call is what matters for failover anyway: it
+    records which engine actually answered versus which was requested.
+
+    provenance keys:
+        requested  - what the caller asked for ("auto" when unspecified)
+        engine     - the engine that returned results, or None if none did
+        failed_over- True when `engine` differs from `requested`
+        tried      - every engine attempted, in order
+        first_error- string form of the first failure, or None
+    """
+    from ddgs import DDGS
+
+    requested = engine if engine else "auto"
+    backend = _resolve_engine(engine)
+    kwargs = {} if backend is None else {"backend": backend}
+    tried = []
+    first_error = None
+
+    def _one(kw, label):
+        tried.append(label)
+        return [
+            {"title": r["title"], "url": r["href"], "snippet": r.get("body", "")}
+            for r in DDGS().text(query, max_results=n, **kw)
+        ]
+
+    def _prov(answered):
+        # failed_over means "something other than the request was tried".
+        # Deriving it from `answered` alone was wrong: when every engine
+        # fails there is no answering engine, yet failover may well have
+        # been attempted, and a caller needs to know that.
+        alternates = [t for t in tried if t != label]
+        return {
+            "requested": requested,
+            "engine": answered,
+            "failed_over": bool(alternates),
+            "tried": list(tried),
+            "first_error": str(first_error) if first_error is not None else None,
+        }
+
+    label = backend if backend is not None else "auto"
+    try:
+        got = _one(kwargs, label)
+        if got:
+            return got, _prov(label)
+    except Exception as e:  # noqa: BLE001 - failover is the point
+        first_error = e
+
+    chain = _failover_chain(backend)
+    if backend in (None, "auto"):
+        chain = known_engines()
+    for alt in chain[:MAX_FAILOVER_ATTEMPTS]:
+        try:
+            got = _one({"backend": alt}, alt)
+        except Exception as e:  # noqa: BLE001 - try the next engine
+            if first_error is None:
+                first_error = e
+            continue
+        if got:
+            _warn(f"engine '{label}' failed ({first_error or 'no results'}); fell back to '{alt}'")
+            return got, _prov(alt)
+
+    if first_error is not None:
+        raise SearchError(str(first_error), provenance=_prov(None))
+    return [], _prov(None)
+
+
 def search(query, n=5, engine=None):
     """Search the web via the ddgs metasearch and normalize the results.
 
@@ -123,49 +208,13 @@ def search(query, n=5, engine=None):
     The fallback is announced on stderr (never silent), and the ORIGINAL
     error is re-raised when nothing works, so the true cause survives
     instead of a generic "all engines failed".
+
+    Returns a bare list for backward compatibility. Use
+    ``search_with_provenance`` when you also need to know which engine
+    actually answered (relevant since failover can substitute another one).
     """
-    from ddgs import DDGS
-
-    backend = _resolve_engine(engine)
-    kwargs = {} if backend is None else {"backend": backend}
-
-    def _one(kw):
-        return [
-            {"title": r["title"], "url": r["href"], "snippet": r.get("body", "")}
-            for r in DDGS().text(query, max_results=n, **kw)
-        ]
-
-    first_error = None
-    try:
-        got = _one(kwargs)
-        if got:
-            return got
-    except Exception as e:  # noqa: BLE001 - failover is the point
-        first_error = e
-
-    # Only fail over when we can name a specific engine to start from.
-    # For auto/no-engine the registry list IS the fallback order; for an
-    # explicit engine we skip the ones already tried.
-    chain = _failover_chain(backend)
-    if backend in (None, "auto"):
-        chain = known_engines()
-    for alt in chain[:MAX_FAILOVER_ATTEMPTS]:
-        try:
-            got = _one({"backend": alt})
-        except Exception as e:  # noqa: BLE001 - try the next engine
-            if first_error is None:
-                first_error = e
-            continue
-        if got:
-            _warn(
-                f"engine '{backend or 'auto'}' failed "
-                f"({first_error or 'no results'}); fell back to '{alt}'"
-            )
-            return got
-
-    if first_error is not None:
-        raise first_error
-    return []
+    results, _ = search_with_provenance(query, n=n, engine=engine)
+    return results
 
 
 def _read_json(path):

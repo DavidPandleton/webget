@@ -25,14 +25,19 @@ class TestCmdSearchEngine:
     def test_engine_reaches_search_call(self, monkeypatch, capsys):
         captured = {}
 
-        def fake_search(query, n=5, engine=None):
+        def fake_prov(query, n=5, engine=None):
             captured["query"] = query
             captured["n"] = n
             captured["engine"] = engine
-            return [{"title": "T", "url": "https://x.example", "snippet": "s"}]
+            return (
+                [{"title": "T", "url": "https://x.example", "snippet": "s"}],
+                {"requested": engine or "auto", "engine": engine or "auto", "failed_over": False},
+            )
 
-        # patch where it is USED (webget.cli namespace), not where defined
-        monkeypatch.setattr(cli, "search", fake_search)
+        # patch where it is USED (webget.cli namespace), not where defined.
+        # The CLI prefers search_with_provenance, so patching only `search`
+        # would leave the real network path live.
+        monkeypatch.setattr(cli, "search_with_provenance", fake_prov)
         monkeypatch.setattr("sys.argv", ["webget", "s", "query", "--engine", "brave"])
         try:
             cli.main()
@@ -44,10 +49,11 @@ class TestCmdSearchEngine:
     def test_invalid_engine_does_not_crash_cli(self, monkeypatch, capsys):
         monkeypatch.setattr(
             cli,
-            "search",
-            lambda query, n=5, engine=None: [
-                {"title": "T", "url": "https://y.example", "snippet": "s"}
-            ],
+            "search_with_provenance",
+            lambda query, n=5, engine=None: (
+                [{"title": "T", "url": "https://y.example", "snippet": "s"}],
+                {"requested": engine or "auto", "engine": engine or "auto", "failed_over": False},
+            ),
         )
         monkeypatch.setattr("sys.argv", ["webget", "s", "q", "--engine", "totally-bogus"])
         try:

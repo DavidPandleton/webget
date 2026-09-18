@@ -96,7 +96,8 @@ class TestNoSecretLeakage:
 
         res = _run(run())
         payload = json.loads(res.content[0].text)
-        for entry in payload:
+        assert {"results", "engine", "requested_engine", "failed_over"} <= set(payload)
+        for entry in payload["results"]:
             assert {
                 "rank",
                 "search_title",

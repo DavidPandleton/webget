@@ -24,6 +24,7 @@ Options:
                       comma-delimited subset like brave,duckduckgo.
                       Unknown names degrade to auto. A dead engine
                       falls over to others automatically (default: auto)
+  --json              Output results as JSON (with --engine provenance)
   --fresh             Bypass cache and re-scrape
   --ttl N             Cache TTL in seconds (default: 3600)
   --strategy S        Fetch strategy: auto|http|crawl4ai|firecrawl (default auto)
@@ -59,7 +60,7 @@ from .profile import (
     list_profiles,
     profile_dir,
 )
-from .search import search
+from .search import search, search_with_provenance
 
 __doc__ = (
     "webget - local search + scrape, zero API keys, unlimited usage.\n"
@@ -163,6 +164,17 @@ def parse_opts(args):
         retry_transient,
         engine,
     )
+
+
+def _search_with_prov(query, n=5, engine=None):
+    """Return (results, provenance) from the search layer.
+
+    Calls the module-level name directly so linters see it as used. An
+    earlier version used globals().get(), which made ruff strip the import
+    as unused (F401) and silently killed real provenance; tests still
+    passed because they monkeypatched the name back in.
+    """
+    return search_with_provenance(query, n=n, engine=engine)
 
 
 def cmd_profiles(json_out):
@@ -303,10 +315,25 @@ def main():
     if cmd == "s":
         n = limit or (int(args[2]) if len(args) > 2 else 5)
         try:
-            results = search(q, n=n, engine=engine)
+            results, prov = _search_with_prov(q, n=n, engine=engine)
         except Exception as e:  # noqa: BLE001 - surface a clean error, not a traceback
             print(f"error: search failed: {e}")
             sys.exit(1)
+        if json_out:
+            # Provenance travels in the payload because the stderr warning
+            # is lost the moment this is piped (webget s q --json | jq).
+            print(
+                json.dumps(
+                    {
+                        "results": results,
+                        "engine": prov.get("engine"),
+                        "requested_engine": prov.get("requested"),
+                        "failed_over": prov.get("failed_over", False),
+                    },
+                    indent=2,
+                )
+            )
+            return
         for i, r in enumerate(results):
             print(f"{i + 1}. {r['title']}\n   {r['url']}\n   {r['snippet'][:200]}\n")
 

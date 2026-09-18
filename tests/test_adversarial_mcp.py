@@ -172,7 +172,7 @@ class TestSSRFViaMCP:
         assert "private" in res.content[0].text.lower()
 
     def test_search_output_shape(self):
-        """search must return list of dicts with title/url/snippet."""
+        """search must return {results: [...], engine: ...} with provenance."""
 
         async def run():
             params = StdioServerParameters(command=sys.executable, args=[str(MCP)])
@@ -183,6 +183,11 @@ class TestSSRFViaMCP:
 
         res = _run(run())
         payload = json.loads(res.content[0].text)
-        assert isinstance(payload, list)
-        if payload:
-            assert {"title", "url", "snippet"} <= set(payload[0])
+        assert isinstance(payload, dict)
+        # Provenance keys are part of the contract: `engine` is the one that
+        # actually answered, which can differ from `requested_engine`.
+        assert {"results", "engine", "requested_engine", "failed_over"} <= set(payload)
+        results = payload["results"]
+        assert isinstance(results, list)
+        if results:
+            assert {"title", "url", "snippet"} <= set(results[0])
