@@ -22,7 +22,8 @@ Options:
   -t, --timeout N     Per-URL timeout in seconds (default: 20)
   -e, --engine NAMES  Search engines (ddgs metasearch): auto or a
                       comma-delimited subset like brave,duckduckgo.
-                      Unknown names degrade to auto (default: auto)
+                      Unknown names degrade to auto. A dead engine
+                      falls over to others automatically (default: auto)
   --fresh             Bypass cache and re-scrape
   --ttl N             Cache TTL in seconds (default: 3600)
   --strategy S        Fetch strategy: auto|http|crawl4ai|firecrawl (default auto)

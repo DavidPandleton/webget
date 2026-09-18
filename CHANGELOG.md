@@ -7,6 +7,7 @@ All notable changes to webget are documented here. Format follows
 
 ### Added
 - Multi-engine search: `webget s`/`su` accept `--engine` (or `-e`) and the MCP `search`/`search_fetch` tools accept an `engine` parameter. The `ddgs` dependency is a metasearch that aggregates 9 keyless engines (brave, duckduckgo, google, mojeek, startpage, wikipedia, yahoo, yandex and more); the default `auto` runs all of them, while a comma-delimited subset like `--engine brave,duckduckgo` is roughly 3-6x faster and routes around a single engine having a bad hour. Engine names are validated against ddgs's runtime registry and unknown names degrade to `auto` with a warning instead of failing, so a typo or a registry change between releases never kills a search.
+- Search failover: when the selected engine raises OR returns zero results, webget tries up to 3 further engines and returns the first non-empty set. The substitution is always announced on stderr, and the original error is re-raised when nothing works, so the real cause (TLS, 429) survives instead of a generic "all engines failed". This matters because engine health is host-specific: a benchmark from the author's network found only 1 of 9 engines reachable, and `auto` survived only because that one did. Bounded at 3 attempts so worst-case latency stays near the single-engine case.
 
 ## [0.12.1] - 2026-09-16
 
