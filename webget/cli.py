@@ -436,7 +436,9 @@ def main():
                 f"\n{'=' * 60}\n## {i + 1}. {r['title']}  [{stat}/{method}]{'  ' + err if err else ''}\n{'=' * 60}"
             )
             print(f"URL: {r['url']}")
-            print(got.get("markdown", "")[:max_chars] if not fail else "(no content)")
+            # markdown is already smart-truncated (and marked) by the fetchers;
+            # a second [:max_chars] here would chop the truncation marker off.
+            print(got.get("markdown", "") if not fail else "(no content)")
 
     else:
         print("Unknown command:", cmd)

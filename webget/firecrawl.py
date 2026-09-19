@@ -15,6 +15,8 @@ import os
 
 import httpx
 
+from .truncate import smart_truncate
+
 
 def firecrawl_key():
     return os.environ.get("WEBGET_FIRECRAWL_KEY", "").strip()
@@ -55,7 +57,7 @@ async def fetch_firecrawl(url, max_chars, key, timeout=30):
         meta = data.get("metadata", {}) or {}
         return {
             "title": meta.get("title", ""),
-            "markdown": md[:max_chars],
+            "markdown": smart_truncate(md, max_chars),
             "status_code": r.status_code,
             "html": "",
         }

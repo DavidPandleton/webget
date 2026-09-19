@@ -29,6 +29,7 @@ from .profile import (
     profile_state_path,
 )
 from .ssrf import _is_private_target as _real_is_private_target
+from .truncate import smart_truncate
 
 
 def _warn(msg):
@@ -558,7 +559,7 @@ async def scrape_many(
                                 res = await _resolve_crawl4ai_once()(
                                     crawler_ctx, cfg, url, per_url_timeout
                                 )
-                                res["markdown"] = res.get("markdown", "")[:max_chars]
+                                res["markdown"] = smart_truncate(res.get("markdown", ""), max_chars)
                                 return url, await record(url, "crawl4ai", res=res)
                             except TimeoutError:
                                 return url, await record(

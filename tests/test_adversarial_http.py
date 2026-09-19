@@ -166,9 +166,14 @@ class TestResponseBodies:
         assert _one(res)["status"] == "success"  # httpx auto-decompresses
 
     def test_huge_response_is_bounded(self, fresh_cache):
+        from webget.truncate import ELLIPSIS_MARKER
+
         server = fresh_cache
         # 5MB body; scrape_many must truncate, not blow memory or hang.
         res = asyncio.run(_fetch(server.url("/huge"), max_chars=1000))
         out = _one(res)
         assert out["status"] == "success"
-        assert len(out["markdown"]) <= 1000
+        # smart_truncate cuts at the limit and appends the ellipsis marker
+        # (this body has no clean boundary, so it is a hard cut at the limit).
+        assert len(out["markdown"]) <= 1000 + len(ELLIPSIS_MARKER)
+        assert out["markdown"].endswith(ELLIPSIS_MARKER)

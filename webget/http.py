@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .ssrf import SSRFError, _private_ip_for
+from .truncate import smart_truncate
 
 # Max response body webget will read from the HTTP fast path (bytes).
 # Guards against memory exhaustion from giant/binary downloads.
@@ -348,7 +349,7 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
                     title, md, meta = _convert_non_html(ctype, raw_body, current)
                     return {
                         "title": title,
-                        "markdown": md[:max_chars],
+                        "markdown": smart_truncate(md, max_chars),
                         "metadata": meta,
                         "non_html": True,
                         "status_code": r.status_code,
@@ -361,7 +362,7 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
                 md, meta = await asyncio.to_thread(_extract_with_metadata, html)
                 return {
                     "title": title,
-                    "markdown": md[:max_chars],
+                    "markdown": smart_truncate(md, max_chars),
                     "metadata": meta,
                     "status_code": r.status_code,
                     "html": html[:8000],
