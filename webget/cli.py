@@ -38,6 +38,7 @@ __doc__ = (
     "  webget login URL --profile X   Open browser, log in manually, persist session\n"
     "  webget profiles [--json]       List profiles and session status\n"
     "  webget logout URL --profile X  Clear auth for one domain, keep the rest\n"
+    "  webget doctor [--json]         Show which browsers/tools are usable here\n"
     "  webget map URL [--limit N]     Discover URLs via sitemaps and robots.txt\n"
     "Aliases: search = s, fetch = u, search-fetch = su\n"
     "\n"
@@ -226,6 +227,124 @@ def cmd_logout(site, profile):
     return 0
 
 
+def cmd_doctor(json_out=False):
+    """Report the environment: which optional pieces are present and usable.
+
+    Exists because "why did my crawl behave differently on this machine" is the
+    most common question, and the answer is usually one of: a browser was
+    detected but cannot be driven, crawl4ai is missing, or the search backend
+    is unreachable. Printing the resolved decision beats guessing.
+    """
+    report: dict = {}
+
+    # 1. Browser resolution for the crawl4ai pass.
+    from . import browser as _browser
+
+    try:
+        choice = _browser.resolve_browser()
+        browsers = _browser.scan_installed_browsers()
+        report["browser"] = {
+            "selected": choice.describe(),
+            "source": choice.source,
+            "usable": choice.usable,
+            "browser_config_kwargs": choice.to_browser_config_kwargs(),
+            "reason": choice.reason,
+            "caveat": choice.caveat,
+            "detected": [
+                {"name": n, "channel": c, "path": p, "usable": bool(c)} for n, c, p in browsers
+            ],
+        }
+    except ValueError as exc:
+        report["browser"] = {"selected": None, "usable": False, "error": str(exc)}
+
+    # 2. Optional crawl4ai dependency.
+    try:
+        import crawl4ai
+
+        version = getattr(crawl4ai, "__version__", "unknown")
+        if not isinstance(version, str):
+            version = getattr(version, "__version__", "unknown")
+        report["crawl4ai"] = {"installed": True, "version": version}
+    except ImportError:
+        report["crawl4ai"] = {
+            "installed": False,
+            "hint": "pip install webget-cli[browser] to enable the browser fallback",
+        }
+
+    # 3. Playwright's own download cache, if any.
+    cache = os.path.expanduser("~/.cache/ms-playwright")
+    bundled = []
+    if os.path.isdir(cache):
+        for entry in sorted(os.listdir(cache)):
+            if entry.startswith("chromium-"):
+                bundled.append(entry)
+    report["playwright_cache"] = {"path": cache, "chromium_builds": bundled}
+
+    # 4. Which optional pieces of the ladder are configured.
+    report["env"] = {
+        "WEBGET_BROWSER_CDP": os.environ.get("WEBGET_BROWSER_CDP") or None,
+        "WEBGET_BROWSER_CHANNEL": os.environ.get("WEBGET_BROWSER_CHANNEL") or None,
+        "WEBGET_BROWSER_PATH": os.environ.get("WEBGET_BROWSER_PATH") or None,
+        "FIRECRAWL_API_KEY": "set" if os.environ.get("FIRECRAWL_API_KEY") else None,
+    }
+
+    if json_out:
+        print(json.dumps(report, indent=2))
+        return
+
+    b = report["browser"]
+    print("webget doctor")
+    print("=" * 60)
+    print("\nbrowser pass (crawl4ai):")
+    if b.get("error"):
+        print(f"  ERROR: {b['error']}")
+    else:
+        mark = "usable" if b["usable"] else "NOT USABLE"
+        print(f"  selected: {b['selected']}  [{mark}]")
+        print(f"  source:   {b['source']}")
+        print(f"  reason:   {b['reason']}")
+        if b["caveat"]:
+            print(f"  caveat:   {b['caveat']}")
+        kwargs = b["browser_config_kwargs"]
+        print(f"  config:   {kwargs if kwargs else '{} (playwright bundled)'}")
+
+    if b.get("detected"):
+        print("\n  detected on this machine:")
+        for d in b["detected"]:
+            mark = "usable" if d["usable"] else "no playwright channel"
+            print(f"    - {d['name']:<10} {d['path']}  ({mark})")
+    else:
+        print("\n  detected on this machine: none")
+
+    c = report["crawl4ai"]
+    print("\ncrawl4ai:")
+    if c["installed"]:
+        print(f"  installed, version {c['version']}")
+    else:
+        print(f"  NOT installed. {c['hint']}")
+
+    pc = report["playwright_cache"]
+    print("\nplaywright download cache:")
+    print(f"  {pc['path']}")
+    if pc["chromium_builds"]:
+        for build in pc["chromium_builds"]:
+            print(f"    - {build}")
+    else:
+        print("    (no chromium builds downloaded)")
+
+    e = report["env"]
+    print("\nenvironment overrides:")
+    any_set = False
+    for key, value in e.items():
+        if value:
+            print(f"  {key}={value}")
+            any_set = True
+    if not any_set:
+        print("  (none set)")
+
+    print("\n" + "=" * 60)
+
+
 def main():
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
@@ -289,6 +408,9 @@ def main():
         sys.exit(cmd_login(q, profile, headless))
     elif cmd == "profiles":
         cmd_profiles(json_out)
+        return
+    elif cmd == "doctor":
+        cmd_doctor(json_out)
         return
     elif cmd == "logout":
         sys.exit(cmd_logout(q, profile))

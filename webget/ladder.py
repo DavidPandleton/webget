@@ -17,6 +17,7 @@ import time
 from collections import Counter
 from urllib.parse import urlparse
 
+from . import browser as _browser_module
 from . import firecrawl as _firecrawl_module
 from . import http as _http_module
 from . import ssrf as _ssrf_module
@@ -543,53 +544,82 @@ async def scrape_many(
             # (e.g. firecrawl fallback) and so terminal state is written below.
         else:
             if pending:
-                bc = BrowserConfig(
-                    use_persistent_context=bool(profile),
-                    user_data_dir=profile_dir(profile) if profile else None,
-                    cookies=cookies or None,
-                    headers=headers or None,
-                )
-                cfg = CrawlerRunConfig()
-                async with AsyncWebCrawler(config=bc, verbose=False) as crawler_ctx:
-                    await _ssrf_module._guard_browser_routes(crawler_ctx)
+                # Use a browser the user already has when one exists, so the
+                # Playwright download is only paid for when nothing else is
+                # available. A bad WEBGET_BROWSER_PATH raises here; that is
+                # intentional, it means the user asked for something specific.
+                try:
+                    choice = _browser_module.resolve_browser()
+                except ValueError as exc:
+                    _warn(str(exc))
+                    for url in pending:
+                        reasons[url].append(("error", "crawl4ai", str(exc)))
+                    choice = None
 
-                    async def crawl_one(url):
-                        async with sem:
+                if choice is not None:
+                    bc_kwargs = choice.to_browser_config_kwargs()
+                    if choice.is_external and choice.usable:
+                        _warn(
+                            f"using {choice.describe()} for the browser pass; set "
+                            "WEBGET_BROWSER_CHANNEL or WEBGET_BROWSER_CDP to override"
+                        )
+                    elif not choice.usable:
+                        # Detected but cannot be driven. Say so plainly instead of
+                        # silently falling back and leaving the user to guess why
+                        # their browser was ignored.
+                        _warn(choice.caveat or choice.reason)
+                    bc = BrowserConfig(
+                        use_persistent_context=bool(profile),
+                        user_data_dir=profile_dir(profile) if profile else None,
+                        cookies=cookies or None,
+                        headers=headers or None,
+                        **bc_kwargs,
+                    )
+                    cfg = CrawlerRunConfig()
+                    async with AsyncWebCrawler(config=bc, verbose=False) as crawler_ctx:
+                        await _ssrf_module._guard_browser_routes(crawler_ctx)
+
+                        async def crawl_one(url):
+                            async with sem:
+                                try:
+                                    res = await _resolve_crawl4ai_once()(
+                                        crawler_ctx, cfg, url, per_url_timeout
+                                    )
+                                    res["markdown"] = smart_truncate(
+                                        res.get("markdown", ""), max_chars
+                                    )
+                                    return url, await record(url, "crawl4ai", res=res)
+                                except TimeoutError:
+                                    return url, await record(
+                                        url, "crawl4ai", exc=TimeoutError("timeout")
+                                    )
+                                except Exception as e:  # noqa: BLE001 - record reason, ladder continues
+                                    return url, await record(url, "crawl4ai", exc=e)
+
+                        for url, out in await asyncio.gather(
+                            *(crawl_one(u) for u in pending)
+                        ):
+                            if out:
+                                results[url] = out
+                        pending = [u for u in pending if u not in results]
+                        if profile:
                             try:
-                                res = await _resolve_crawl4ai_once()(
-                                    crawler_ctx, cfg, url, per_url_timeout
-                                )
-                                res["markdown"] = smart_truncate(res.get("markdown", ""), max_chars)
-                                return url, await record(url, "crawl4ai", res=res)
-                            except TimeoutError:
-                                return url, await record(
-                                    url, "crawl4ai", exc=TimeoutError("timeout")
-                                )
-                            except Exception as e:  # noqa: BLE001 - record reason, ladder continues
-                                return url, await record(url, "crawl4ai", exc=e)
-
-                    for url, out in await asyncio.gather(*(crawl_one(u) for u in pending)):
-                        if out:
-                            results[url] = out
-                    pending = [u for u in pending if u not in results]
-                    if profile:
-                        try:
-                            # Persist session so future HTTP-path fetches can reuse it.
-                            # Note: crawl4ai's export_storage_state is broken in 0.9.2
-                            # (accesses self.default_context on the strategy, which
-                            # lives on browser_manager instead) - go direct.
-                            bm = crawler_ctx.crawler_strategy.browser_manager
-                            if bm and bm.default_context is not None:
-                                await bm.default_context.storage_state(
-                                    path=profile_state_path(profile)
-                                )
-                            else:
-                                _warn(
-                                    f"profile '{profile}' used but no browser context "
-                                    "available; session will NOT be persisted"
-                                )
-                        except Exception as e:  # noqa: BLE001 - warn, don't crash the batch
-                            _warn(f"failed to persist profile session for '{profile}': {e}")
+                                # Persist session so future HTTP-path fetches can reuse it.
+                                # Note: crawl4ai's export_storage_state is broken in 0.9.2
+                                # (accesses self.default_context on the strategy, which
+                                # lives on browser_manager instead) - go direct.
+                                bm = crawler_ctx.crawler_strategy.browser_manager
+                                if bm and bm.default_context is not None:
+                                    await bm.default_context.storage_state(
+                                        path=profile_state_path(profile)
+                                    )
+                                else:
+                                    _warn(
+                                        f"profile '{profile}' used but no browser context "
+                                        "available; session will NOT be persisted"
+                                    )
+                            except Exception as e:  # noqa: BLE001 - warn, don't crash the batch
+                                _warn(f"failed to persist profile session for '{profile}': {e}")
 
     # Pass 3: Firecrawl - optional cloud escape hatch.
     if pending and "firecrawl" in steps:

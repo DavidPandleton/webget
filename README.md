@@ -66,13 +66,48 @@ webget --help
 
 ### Browser runtime (optional)
 
-Crawl4AI drives a Playwright Chromium. `pip install "webget-cli[browser]"`
+Crawl4AI drives a Playwright browser. `pip install "webget-cli[browser]"`
 installs the Python packages; the browser binary itself is downloaded
 separately:
 
 ```bash
 python -m playwright install chromium
 ```
+
+**You may not need that download.** Before reaching for Playwright's bundled
+Chromium, webget looks for a Chromium-family browser already installed on the
+machine and uses it when it can actually be driven. Run `webget doctor` to see
+what was found and what will be used:
+
+```bash
+webget doctor
+```
+
+Resolution order (first match wins):
+
+| Step | Source | Notes |
+|---|---|---|
+| 1 | `WEBGET_BROWSER_CDP` | Attach to a running browser over CDP. The only route that works for browsers with no Playwright channel. |
+| 2 | `WEBGET_BROWSER_CHANNEL` | A Playwright channel: `chrome`, `msedge`, or `chromium`. |
+| 3 | `WEBGET_BROWSER_PATH` | An explicit binary. Accepted, but see the limitation below. |
+| 4 | Auto-detected browser | Chrome, Edge, Chromium, Brave, Vivaldi or Opera found on the machine. |
+| 5 | Playwright bundled Chromium | The fallback when nothing usable is found. |
+
+Two limitations worth knowing, both reported honestly by `webget doctor`
+instead of failing quietly:
+
+- **Brave, Vivaldi and Opera cannot be launched by crawl4ai.** Playwright has no
+  channel for them, and crawl4ai 0.9.2 does not forward `executable_path` to
+  Playwright, so there is no path to the binary. They are detected and reported
+  as NOT USABLE. The workaround is CDP: start the browser with
+  `--remote-debugging-port=9222`, then set
+  `WEBGET_BROWSER_CDP=http://127.0.0.1:9222`.
+- **CDP is opt-in on purpose.** Attaching to a browser you are already logged
+  into mixes your personal session cookies into crawl output, so webget never
+  auto-detects an open debugging port.
+
+System Firefox is never selected: Playwright drives Firefox over WebDriver BiDi
+with its own patched build.
 
 Without the browser extra, `webget` still works for search and plain HTTP
 fetches. A fetch that needs the browser (JS rendering, `--profile` sessions,

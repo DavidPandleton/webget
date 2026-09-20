@@ -3,6 +3,44 @@
 All notable changes to webget are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Browser discovery for the crawl4ai pass (`webget/browser.py`). Instead of always
+  using Playwright's bundled Chromium, webget now looks for a Chromium-family
+  browser already installed and uses it when one can actually be driven. The
+  resolution order is explicit intent first: `WEBGET_BROWSER_CDP`, then
+  `WEBGET_BROWSER_CHANNEL`, then `WEBGET_BROWSER_PATH`, then a detected browser,
+  then the bundled download. Nothing runs at install time, because a browser can
+  be added or removed after `pip install` and an install-time probe would be
+  stale by the time it matters.
+- `webget doctor` prints the resolved browser, every browser found on the
+  machine, which of them are usable, the crawl4ai and Playwright-cache state,
+  and any environment overrides in effect. `--json` for machine-readable output.
+  This exists because "the crawl behaved differently on my machine" is the most
+  common question and the answer is usually a browser that was detected but
+  cannot be launched.
+- `WEBGET_BROWSER_CDP` to attach to an already-running browser over CDP. This is
+  the only route that works for browsers Playwright has no channel for. It is
+  deliberately opt-in and never auto-detected: attaching to a browser the user is
+  logged into mixes their personal session cookies into crawl output.
+
+### Fixed
+- The browser pass silently used Playwright's bundled Chromium even when Chrome
+  or Edge was installed, downloading ~150MB that was already present on disk.
+
+### Notes
+- Detection is broader than usability, and webget now says so instead of
+  pretending. crawl4ai 0.9.2 forwards only `channel` to Playwright
+  (`browser_manager._build_browser_args()` emits `{"headless", "args",
+  "channel"}` and calls `playwright.chromium.launch(**browser_args)`), so
+  `executable_path` is unreachable and `BrowserConfig(executable_path=...)`
+  raises TypeError. Consequence: Brave, Vivaldi and Opera are detected but
+  cannot be launched by crawl4ai; `webget doctor` reports them as NOT USABLE
+  with the reason and the CDP workaround. System Firefox is never selected
+  either, because Playwright drives Firefox over WebDriver BiDi with its own
+  patched build.
+
 ## [0.14.0] - 2026-09-19
 
 ### Added
