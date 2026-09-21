@@ -3,7 +3,7 @@
 All notable changes to webget are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.15.0] - 2026-09-21
 
 ### Added
 - Browser discovery for the crawl4ai pass (`webget/browser.py`). Instead of always
