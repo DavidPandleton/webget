@@ -161,7 +161,7 @@ jobs:
           /tmp/inst/bin/pip install "fastmcp>=4"
           /tmp/inst/bin/python -c "import webget_mcp; print('webget_mcp imports')"
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
