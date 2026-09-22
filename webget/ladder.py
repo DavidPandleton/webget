@@ -320,13 +320,13 @@ def _terminal_state(reasons, profile):
             # laporan yang menyembunyikan satu percobaan membuat
             # pemanggil menyimpulkan tool hanya mencoba sekali.
             pesan = "; ".join(
-                d if not m else "%s: %s" % (m, d) for _, m, d in cocok
+                d if not m else f"{m}: {d}" for _, m, d in cocok
             )
             return wanted, authenticated, pesan, cocok[0][1]
     first = reasons[0] if reasons else None
     method = first[1] if first else ""
     gabungan = "; ".join(
-        d if not m else "%s: %s" % (m, d) for _, m, d in reasons
+        d if not m else f"{m}: {d}" for _, m, d in reasons
     )
     return "error", None, gabungan, method
 

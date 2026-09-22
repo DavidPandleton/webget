@@ -28,7 +28,7 @@ def _ambil(satu_hasil):
     for nilai in satu_hasil.values():
         if isinstance(nilai, dict) and "status" in nilai:
             return nilai
-    raise AssertionError("tidak ada objek hasil di %r" % (satu_hasil,))
+    raise AssertionError(f"tidak ada objek hasil di {satu_hasil!r}")
 
 
 class TestThinContentReason:
@@ -58,8 +58,8 @@ class TestThinContentReason:
         # berhasil, hasil akhirnya tidak akan error.
         for state, method, detail in reasons:
             assert state != "success", (
-                "langkah %s melaporkan state=success padahal hasil akhir "
-                "error dengan detail=%r" % (method, detail)
+                f"langkah {method} melaporkan state=success padahal hasil "
+                f"akhir error dengan detail={detail!r}"
             )
 
     def test_thin_content_error_names_the_method(self, fresh_cache):
@@ -74,7 +74,7 @@ class TestThinContentReason:
         out = _ambil(hasil)
         pesan = out.get("error") or ""
         assert "http" in pesan, (
-            "pesan error %r tidak menyebut metode yang menolak" % pesan
+            f"pesan error {pesan!r} tidak menyebut metode yang menolak"
         )
 
     def test_success_carries_empty_reasons(self, fresh_cache):
