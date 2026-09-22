@@ -361,12 +361,41 @@ def _logout_domain_regex(host):
 
 
 def _prune_storage_cookies(state, host):
-    """Remove cookies belonging to host (and its subdomains) from a
-    storage_state dict. Returns (new_state, removed_count)."""
+    """Remove cookies AND local storage belonging to host (and its
+    subdomains) from a storage_state dict. Returns (new_state, removed).
+
+    `removed` counts cookies plus localStorage/sessionStorage entries, so
+    callers report how much session data was actually cleared.
+
+    LOCAL STORAGE MATTERS. This function used to clear only
+    state["cookies"], while the module docstring states a profile holds
+    "(cookies + local storage)". Playwright's storage_state carries
+    state["origins"] -> local_storage alongside cookies, and SPA login
+    flows routinely keep the session token there rather than in a cookie.
+    Leaving it behind means "logout" did not log the user out: the next
+    fetch with the same profile was still authenticated. A logout that
+    reports success but leaves a live token is a security problem, since
+    the user believes the session ended.
+    """
     cookies = state.get("cookies") or []
     kept = [c for c in cookies if not _cookie_belongs_to(c.get("domain", ""), host)]
     state["cookies"] = kept
-    return state, len(cookies) - len(kept)
+    removed = len(cookies) - len(kept)
+
+    origins = state.get("origins") or []
+    kept_origins = []
+    for entry in origins:
+        origin = entry.get("origin") or ""
+        # Origin is a full URL (scheme://host[:port]); compare by host.
+        origin_host = origin.split("://", 1)[-1].split("/")[0].split(":")[0]
+        if origin_host and _cookie_belongs_to(origin_host, host):
+            # Count what we drop so the caller can report it.
+            removed += len(entry.get("localStorage") or [])
+            removed += len(entry.get("sessionStorage") or [])
+            continue
+        kept_origins.append(entry)
+    state["origins"] = kept_origins
+    return state, removed
 
 
 async def _logout_flow(site, profile):
