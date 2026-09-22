@@ -289,18 +289,46 @@ def _resolve_private_ip_for():
 
 
 def _terminal_state(reasons, profile):
-    """Pick final state from ladder reasons. Priority: challenge > login_required > blocked > error."""
-    order = ("challenge", "login_required", "blocked", "error")
+    """Pick final state from ladder reasons.
+
+    Priority: challenge > login_required > blocked > thin > error.
+
+    "thin" ditempatkan di atas "error": keduanya kegagalan, tapi kalau
+    satu langkah gagal karena koneksi dan langkah lain menolak konten
+    tipis, yang lebih berguna dilaporkan adalah penolakan tipis - itu
+    memberi tahu pemanggil bahwa permintaannya BERHASIL sampai ke server
+    dan yang perlu diubah adalah ambang atau strategi, bukan jaringan.
+
+    Saat mengembalikan state dari daftar prioritas, `detail` adalah
+    pesan alasan itu sendri yang sudah menyebut metodenya.
+    """
+    order = ("challenge", "login_required", "blocked", "thin", "error")
     for wanted in order:
-        for state, method, detail in reasons:
-            if state == wanted:
-                authenticated = None
-                if state == "login_required":
-                    authenticated = False
-                return state, authenticated, detail, method
+        cocok = [r for r in reasons if r[0] == wanted]
+        if cocok:
+            authenticated = None
+            if wanted == "login_required":
+                authenticated = False
+            # Kumpulkan SEMUA alasan pada prioritas tertinggi yang cocok,
+            # bukan hanya yang pertama. Dulu fungsi ini berhenti di
+            # kecocokan pertama, sehingga kalau http dan crawl4ai
+            # sama-sama gagal (sebab berbeda), hanya metode pertama yang
+            # dilaporkan dan yang lain hilang - pemanggil tidak tahu
+            # bahwa langkah itu juga dicoba.
+            #
+            # Ini melanggar janji "tells you honestly what happened":
+            # laporan yang menyembunyikan satu percobaan membuat
+            # pemanggil menyimpulkan tool hanya mencoba sekali.
+            pesan = "; ".join(
+                d if not m else "%s: %s" % (m, d) for _, m, d in cocok
+            )
+            return wanted, authenticated, pesan, cocok[0][1]
     first = reasons[0] if reasons else None
     method = first[1] if first else ""
-    return "error", None, "; ".join(d for _, _, d in reasons), method
+    gabungan = "; ".join(
+        d if not m else "%s: %s" % (m, d) for _, m, d in reasons
+    )
+    return "error", None, gabungan, method
 
 
 def _auth_message(state, profile):
@@ -445,7 +473,23 @@ async def scrape_many(
                 cache_put(url, cookies, headers, max_chars, out, profile)
             return out
         if state == "success":
-            reasons[url].append((state, method, "content too thin"))
+            # `state` di sini adalah keadaan Autentikasi dari _auth_state
+            # ("success" = tidak ada gerbang auth yang terdeteksi), BUKAN
+            # keadaan langkah ladder ini. Langkah ini GAGAL: kontennya
+            # ditolak karena terlalu tipis di atas. Mencatat "success"
+            # untuk sebuah kegagalan membuat `reasons` berbohong, dan itu
+            # melanggar janji "tells you honestly what happened".
+            #
+            # State "thin" dipakai, bukan "error", karena keduanya masalah
+            # yang berbeda dan pemanggil harus bisa membedakannya:
+            #   - "error"  : koneksi/DNS/HTTP gagal; ulangi mungkin menolong
+            #   - "thin"   : permintaan BERHASIL tapi kontennya ditolak;
+            #                mengulang tidak menolong, yang perlu diubah
+            #                adalah ambang, max_chars, atau strategi
+            #                (memasang crawl4ai untuk render JS).
+            # Sebelumnya keduanya sama-sama "error", sehingga pesan akhir
+            # "content too thin" tidak menyebut metode mana yang menolak.
+            reasons[url].append(("thin", method, "content too thin"))
         else:
             reasons[url].append((state, method, _auth_message(state, profile)))
         return None

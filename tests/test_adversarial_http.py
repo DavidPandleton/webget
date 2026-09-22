@@ -141,8 +141,11 @@ class TestResponseBodies:
     def test_empty_response(self, fresh_cache):
         server = fresh_cache
         res = asyncio.run(_fetch(server.url("/empty")))
-        # empty body -> markdown empty -> "content too thin" -> error terminal
-        assert _one(res)["status"] in ("error", "blocked")
+        # Body kosong: permintaan berhasil (HTTP 200) tapi kontennya
+        # ditolak karena tipis. Status akhirnya kini "thin", bukan
+        # "error" generik, supaya pemanggil bisa membedakan "server tidak
+        # bisa dihubungi" dari "konten ditolak, ubah ambang atau strategi".
+        assert _one(res)["status"] in ("thin", "error", "blocked")
 
     def test_malformed_html(self, fresh_cache):
         server = fresh_cache
