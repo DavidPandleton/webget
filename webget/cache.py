@@ -148,6 +148,14 @@ def cache_put(url, cookies, headers, max_chars, data, profile=None):
             cap = int(os.environ.get("WEBGET_CACHE_MAX", "5000"))
         except ValueError:
             cap = 5000
+        # cap <= 0 membuat eviction menghapus SELURUH cache, bukan sebagian:
+        #   cap = 0  -> int(0*0.8) == 0, irisan live[:len-0] == semua
+        #   cap = -5 -> int(-5*0.8) == -4, irisan live[:len+4] == semua
+        # Satu env var yang salah ketik tidak boleh menghapus seluruh isi
+        # cache. Nilai tidak masuk akal diperlakukan seperti nilai tidak
+        # valid lainnya: kembali ke bawaan.
+        if cap <= 0:
+            cap = 5000
         try:
             files = [
                 os.path.join(cache_dir, f)
