@@ -103,9 +103,23 @@ async def discover_urls(
                 if resp is not None and resp.status_code == 200 and resp.text:
                     found = _extract_sitemap_urls(resp.text)
                     for u in found:
-                        # Check sub-sitemaps if any
+                        # Sub-sitemap hanya kalau URL-nya benar-benar XML.
+                        #
+                        # Sebelumnya: `u.endswith(".xml") or "sitemap" in u`.
+                        # "sitemap" in u cocok dengan HALAMAN BIASA yang
+                        # kebetulan punya "sitemap" di path-nya, mis.
+                        # https://situs/halaman/sitemap-guide/. Halaman itu
+                        # lalu dimasukkan ke antrean sitemap dan di-GET ulang
+                        # untuk di-parse sebagai XML, sehingga:
+                        #   - URL sah itu HILANG dari hasil (masuk antrean,
+                        #     bukan discovered), dan
+                        #   - satu permintaan HTTP terbuang untuk HTML yang
+                        #     pasti gagal di-parse.
+                        # Sekarang hanya .xml (atau .xml.gz) yang dianggap
+                        # sub-sitemap.
+                        is_sub = u.endswith((".xml", ".xml.gz"))
                         if (
-                            (u.endswith(".xml") or "sitemap" in u)
+                            is_sub
                             and u not in sitemap_candidates
                             and len(sitemap_candidates) < 10
                         ):
