@@ -216,10 +216,29 @@ def search_with_provenance(query, n=5, engine=None):
         # ddgs did not raise - several engines are blocked silently, and
         # treating that as success would keep them ranked first.
         _record(label, bool(rows), _time.perf_counter() - t0)
-        return [
-            {"title": r["title"], "url": r["href"], "snippet": r.get("body", "")}
-            for r in rows
-        ]
+        # Normalisasi dengan toleransi. `body` sudah lama memakai .get(),
+        # tapi `title` dan `href` diakses langsung, sehingga SATU baris
+        # cacat dari engine yang sehat melempar KeyError dan menggagalkan
+        # SELURUH pencarian - 14 hasil bagus ikut hilang karena 1 baris
+        # tanpa "title". Provider memang mengirim baris tidak lengkap
+        # (ddgs memetakan beberapa backend dengan bentuk berbeda), jadi
+        # lewati baris yang tidak punya tujuan, dan beri nilai kosong
+        # untuk judul yang hilang.
+        hasil = []
+        for r in rows:
+            href = r.get("href")
+            if not href:
+                # Tanpa URL, hasilnya tidak berguna bagi pemanggil
+                # (tidak bisa dibuka). Lewati, jangan gagalkan semuanya.
+                continue
+            hasil.append(
+                {
+                    "title": r.get("title") or "",
+                    "url": href,
+                    "snippet": r.get("body") or "",
+                }
+            )
+        return hasil
 
     def _prov(answered):
         # failed_over means "something other than the request was tried".
