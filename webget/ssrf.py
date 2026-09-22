@@ -104,6 +104,29 @@ def _hostname_private(host):
     ips = _resolve_hostname_ips(host)
     if not ips:
         # DNS failure is not a privacy violation; let the fetch fail normally.
+        #
+        # RISIKO YANG DIKETAHUI (dilaporkan, belum diubah - keputusan pemilik
+        # repo, bukan keputusan audit):
+        #
+        # Ini FAIL-OPEN. Asumsinya "fetch akan gagal normal", padahal guard
+        # dan fetcher memakai resolver BERBEDA:
+        #   guard   : socket.getaddrinfo + DoH (fallback di _doh_resolve)
+        #   fetcher : httpx, yang punya resolusi sendiri dan menghormati
+        #             /etc/hosts serta cache internalnya
+        #
+        # Jika guard gagal me-resolve tapi httpx berhasil, request lolos ke
+        # alamat yang tidak pernah diverifikasi. Dua jalur:
+        #   1. DNS rebinding / TOCTOU: nama di-resolve ke publik saat guard
+        #      memeriksa, lalu ke privat saat httpx menghubungi. Guard hanya
+        #      menyimpan verdict boolean per host, bukan IP yang dipakai,
+        #      sehingga tidak ada pengecekan ulang di koneksi sebenarnya.
+        #   2. Resolver berbeda: getaddrinfo gagal (timeout/NXDOMAIN)
+        #      sementara httpx berhasil lewat /etc/hosts atau cache-nya.
+        #
+        # Mengubahnya menjadi fail-closed akan memblokir host yang DNS-nya
+        # sedang down, termasuk situs publik, jadi tidak dilakukan tanpa
+        # keputusan eksplisit. Bypass sengaja sudah tersedia:
+        # WEBGET_ALLOW_PRIVATE=1 atau argumen allow_private.
         _PRIVATE_IP_CACHE[host] = False
         return False
     try:
