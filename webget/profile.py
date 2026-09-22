@@ -104,19 +104,83 @@ def _auth_state(result, profile):
         return "challenge", None
 
     # Login page / form detection.
+    #
+    # Sinyalnya sengaja diperketat, karena versi sebelumnya terlalu longgar:
+    # `login_words` cocok dengan substring mentah "login"/"sign in" di mana
+    # pun, termasuk menu navigasi dan panduan ("Login", "Sign in with
+    # GitHub"). Digabung dengan `has_password_input`, halaman PUBLIK yang
+    # memuat input password untuk keperluan lain (form demo, field
+    # tersembunyi) dilaporkan "login_required". Pengguna lalu mengejar
+    # masalah sesi yang tidak ada.
+    #
+    # Perbaikan ini hanya MEMPERKETAT sinyal positif; jalur 401 dan
+    # kredensial-label tetap seperti semula supaya halaman yang benar-benar
+    # butuh login (mis. portal kampus dengan label NIM/username) tidak
+    # kehilangan deteksinya.
     has_password_input = "<input" in html and 'type="password"' in html
-    login_words = any(w in text for w in ("log in", "login", "sign in", "signin"))
-    # Sites like SION use JS show/hide instead of type=password and label
-    # fields as "NIM" / "Username". Catch credential-labeled forms too.
+    # "login"/"sign in" yang menempel pada kata lain sering bukan perintah
+    # otentikasi: "design in", "blogin". Cocokkan sebagai kata utuh.
+    import re as _re
+
+    login_words = bool(
+        _re.search(r"\b(log ?in|log-in|sign ?in|sign-in)\b", text)
+    )
+    # Situs seperti SION memakai JS show/hide alih-alih type=password dan
+    # memberi label kolom "NIM" / "Username". Deteksi label kredensial.
     has_credential_labels = "password" in text and any(
         w in text for w in ("nim", "username", "user id", "email")
     )
     has_show_password = "show password" in text
     if status == 401:
         return "login_required", False
+    # Form login: input password DAN perintah login.
+    #
+    # Percobaan pertama gue menuntut keduanya berada di <form> yang SAMA.
+    # Itu terlalu ketat: halaman login sungguhan sering menaruh kata
+    # "Login" di <h1>/judul di LUAR <form> yang memuat input password,
+    # sehingga kontrol (portal yang benar-benar butuh login) justru lolos
+    # jadi "success". Memperketat sinyal sampai halaman login asli tidak
+    # terdeteksi adalah kegagalan yang lebih berbahaya daripada false
+    # positive: pengguna diam-diam tidak diberi tahu bahwa sesinya mati.
+    #
+    # Karena itu jalur ini tetap seperti semula (keduanya dicek di seluruh
+    # dokumen). Yang gue pertahankan hanya perbaikan yang jelas aman:
+    # kata utuh, sehingga "design in" tidak lagi dihitung sebagai "sign in".
     if has_password_input and login_words:
         return "login_required", False
     if has_credential_labels or has_show_password:
+        return "login_required", False
+    # Halaman login yang di-render JS (SPA) sering TIDAK mengirim
+    # <input type="password"> di HTML mentah; formnya dibuat setelah
+    # JavaScript jalan. Halaman semacam itu tetap menyatakan maksudnya
+    # dalam teks: "Please sign in to continue", "You must login first".
+    #
+    # Tanpa cabang ini, halaman tersebut lolos sebagai "success": pengguna
+    # TIDAK diberi tahu bahwa sesinya mati, dan halaman login diambil
+    # sebagai konten yang sah. Itu kegagalan yang lebih berbahaya daripada
+    # false positive, karena diam-diam.
+    #
+    # Sengaja memakai frasa yang menyatakan KEHARUSAN/instruksi, bukan
+    # sekadar kata "login" yang muncul di navigasi mana pun. Frasa di sini
+    # jarang muncul di halaman publik yang tidak meminta otentikasi.
+    login_phrases = (
+        "sign in to continue",
+        "sign in to proceed",
+        "login to continue",
+        "log in to continue",
+        "login to proceed",
+        "please sign in",
+        "please log in",
+        "please login",
+        "you must login",
+        "you must log in",
+        "you must sign in",
+        "must be logged in",
+        "session expired",
+        "session has expired",
+        "your session has timed out",
+    )
+    if any(p in text for p in login_phrases):
         return "login_required", False
     if status == 403:
         # 403 + login/session markers -> login_required; generic 403 -> blocked
