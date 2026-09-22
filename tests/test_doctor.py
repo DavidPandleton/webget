@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
@@ -106,10 +107,37 @@ class DoctorOutputTest(unittest.TestCase):
 
 class DoctorWiringTest(unittest.TestCase):
     def test_doctor_is_dispatched_from_main(self):
-        import inspect
+        """'doctor' harus benar-benar di-dispatch, bukan diuji sebagai string.
 
-        src = inspect.getsource(cli.main)
-        self.assertIn('cmd == "doctor"', src)
+        Versi lama memeriksa inspect.getsource(cli.main) untuk literal
+        'cmd == "doctor"'. Itu menguji TEKS fungsi, bukan perilakunya, dan
+        patah begitu dispatch dipindah ke helper _jalankan_perintah - pesan
+        'doctor' tetap bekerja, tapi lokasi string-nya berubah.
+
+        Diganti dengan pemeriksaan perilaku: jalankan perintahnya dan
+        pastikan keluarannya memang keluaran doctor.
+        """
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        lama = sys.argv
+        sys.argv = ["webget", "doctor", "--json"]
+        try:
+            with (
+                contextlib.suppress(SystemExit),
+                contextlib.redirect_stdout(buf),
+                contextlib.redirect_stderr(buf),
+            ):
+                cli.main()
+        finally:
+            sys.argv = lama
+        keluaran = buf.getvalue()
+        # doctor --json mencetak JSON yang memuat kunci pemeriksaan.
+        self.assertTrue(
+            "browser" in keluaran or "{" in keluaran,
+            f"perintah doctor tidak menghasilkan keluaran doctor:\n{keluaran[:400]}",
+        )
 
     def test_doctor_appears_in_usage(self):
         self.assertIn("webget doctor", cli.__doc__ or "")

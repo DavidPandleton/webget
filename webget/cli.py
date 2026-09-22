@@ -457,6 +457,89 @@ def main():
         cmd = "su"
     q = remaining[1] if len(remaining) > 1 else ""
 
+    def _jumlah_hasil(bawaan):
+        """Jumlah hasil dari argumen ketiga (mis. 'webget s kata 10').
+
+        Divalidasi di sini karena argumen posisional tidak melewati
+        parse_opts, sehingga sebelum ini `webget s kata abc` membuang
+        traceback:
+
+            File ".../webget/cli.py", line 495, in main
+              n = _jumlah_hasil(5)
+            ValueError: invalid literal for int() with base 10: 'abc'
+
+        Opsi --limit sudah divalidasi di parse_opts dan menang atas argumen
+        posisional, jadi hanya dipakai kalau tidak ada --limit.
+        """
+        if limit:
+            return limit
+        if len(remaining) <= 2:
+            return bawaan
+        try:
+            n = int(remaining[2])
+        except (TypeError, ValueError):
+            # ValueError naik ke pembungkus di main(); lihat komentar di sana
+            # soal mengapa traceback tidak boleh sampai ke pengguna.
+            raise ValueError(
+                f"result count expects a whole number, got {remaining[2]!r}"
+            ) from None
+        if n < 1:
+            raise ValueError(f"result count must be >= 1, got {n}")
+        return n
+
+    try:
+        _jalankan_perintah(
+            cmd,
+            q,
+            remaining,
+            _jumlah_hasil,
+            cookies=cookies,
+            headers=headers,
+            profile=profile,
+            headless=headless,
+            json_out=json_out,
+            engine=engine,
+            strategy=strategy,
+            ttl=ttl,
+            fresh=fresh,
+            no_cache=no_cache,
+            concurrency=concurrency,
+            retry_transient=retry_transient,
+            max_chars_override=max_chars_override,
+            timeout_override=timeout_override,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}")
+        sys.exit(2)
+
+
+def _jalankan_perintah(
+    cmd,
+    q,
+    remaining,
+    _jumlah_hasil,
+    *,
+    cookies,
+    headers,
+    profile,
+    headless,
+    json_out,
+    engine,
+    strategy,
+    ttl,
+    fresh,
+    no_cache,
+    concurrency,
+    retry_transient,
+    max_chars_override,
+    timeout_override,
+):
+    """Dispatch satu perintah. Dipisah supaya main() bisa membungkusnya.
+
+    Dipisah dari main() semata-mata agar ValueError dari validasi argumen
+    posisional (_jumlah_hasil) bisa ditangkap di satu tempat dan dicetak
+    sebagai pesan, bukan traceback. Tidak ada logika lain yang berubah.
+    """
     if cmd == "login":
         sys.exit(cmd_login(q, profile, headless))
     elif cmd == "profiles":
@@ -470,7 +553,7 @@ def main():
     elif cmd == "map":
         from .discovery import discover_urls
 
-        n = limit or 100
+        n = 100
         timeout = timeout_override or 10
         urls = asyncio.run(
             discover_urls(
@@ -489,10 +572,7 @@ def main():
         return
 
     if cmd == "s":
-        # Argumen ketiga adalah jumlah hasil. Nilai opsi tidak lagi bisa
-        # bocor ke sini, jadi int() hanya melihat token yang memang dimaksud
-        # pengguna, bukan "uji-kata" atau nama opsi lain.
-        n = limit or (int(remaining[2]) if len(remaining) > 2 else 5)
+        n = _jumlah_hasil(5)
         try:
             results, prov = _search_with_prov(q, n=n, engine=engine)
         except Exception as e:  # noqa: BLE001 - surface a clean error, not a traceback
@@ -561,7 +641,7 @@ def main():
     elif cmd == "su":
         # Sama seperti cmd "s": ambil jumlah hasil dari remaining, bukan
         # args mentah, supaya opsi tidak bocor menjadi nilai int().
-        n = limit or (int(remaining[2]) if len(remaining) > 2 else 3)
+        n = _jumlah_hasil(3)
         max_chars = max_chars_override or 4000
         timeout = timeout_override or 20
         try:

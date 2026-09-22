@@ -89,6 +89,51 @@ class TestMainPakaiRemaining:
         assert int(remaining[2]) == 7
 
 
+class TestJumlahHasilTidakValid:
+    """Argumen posisional (jumlah hasil) juga harus ditolak dengan bersih.
+
+    Argumen ketiga tidak melewati parse_opts, sehingga `webget s kata abc`
+    sempat membuang traceback:
+
+        File ".../webget/cli.py", line 523, in main
+          n = limit or (int(remaining[2]) if len(remaining) > 2 else 5)
+        ValueError: invalid literal for int() with base 10: 'abc'
+
+    Berlaku untuk 's' (bawaan 5) dan 'su' (bawaan 3).
+    """
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["s", "kata", "abc"],
+            ["su", "kata", "abc"],
+            ["s", "kata", "-5"],
+            ["su", "kata", "0"],
+        ],
+    )
+    def test_pesan_bersih_bukan_traceback(self, monkeypatch, args):
+        monkeypatch.setattr(sys, "argv", ["webget"] + args)
+        buf = io.StringIO()
+        with pytest.raises(SystemExit) as keluar, redirect_stdout(buf), redirect_stderr(buf):
+            cli.main()
+        keluaran = buf.getvalue()
+        assert keluar.value.code == 2
+        assert "error:" in keluaran, f"tidak ada pesan error:\n{keluaran}"
+        assert "result count" in keluaran
+        assert "Traceback" not in keluaran, f"pengguna melihat traceback:\n{keluaran}"
+
+    def test_limit_menang_atas_argumen_posisional(self, monkeypatch):
+        """--limit (sudah divalidasi) tidak boleh dikalahkan argumen buruk.
+
+        Karena --limit menang, argumen ketiga yang buruk tidak pernah
+        dievaluasi, jadi tidak boleh menggagalkan perintah.
+        """
+        remaining = _parse(["s", "kata", "abc", "--limit", "4"])
+        # parse_opts menaruh 'abc' di remaining; --limit terpisah.
+        assert remaining == ["s", "kata", "abc"]
+        assert cli.parse_opts(["s", "kata", "abc", "--limit", "4"])[8] == 4
+
+
 class TestAngkaTidakValidDitolak:
     """parse_opts menolak opsi angka yang salah, dengan pesan menyebut flag."""
 
