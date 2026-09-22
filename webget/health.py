@@ -147,7 +147,16 @@ def record(engine, ok, latency_s=0.0, ledger=None):
 
 
 def score(entry, now=None):
-    """Score one ledger entry in [0, 1]. Higher is better."""
+    """Score one ledger entry. Higher is better. Never-seen entries score
+    UNSEEN_SCORE (0.5).
+
+    The real range is [-LATENCY_WEIGHT, 1.0] = [-0.25, 1.0], NOT [0, 1]:
+    an engine that always fails AND is slow gets 0.0 - (lat/cap)*weight,
+    which is negative. The docstring used to claim [0, 1], which would
+    mislead anyone comparing a score against zero to mean "failing" - a
+    -0.25 engine is worse than a 0.0 one, and both are worse than the 0.5
+    given to an engine that has never been tried.
+    """
     if not entry:
         return UNSEEN_SCORE
     now = now or _now()

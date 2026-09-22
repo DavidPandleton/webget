@@ -6,6 +6,10 @@ import httpx
 
 from .ssrf import _is_private_target
 
+# Batas hop redirect manual. Sepadan dengan batas 20 di fetch_http
+# (http.py); discovery cukup 10 karena sitemap jarang berpindah berkali-kali.
+_MAX_REDIRECT_HOP = 10
+
 
 def _extract_sitemap_urls(xml_content):
     urls = []
@@ -53,11 +57,33 @@ async def discover_urls(
     if headers:
         req_headers.update(headers)
 
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    # follow_redirects=False SENGAJA: dengan True, httpx mengikuti 302
+    # di dalam client.get() dan guard tidak pernah menilai hop itu. Domain
+    # publik yang membalas redirect ke 127.0.0.1 atau 169.254.169.254
+    # (cloud metadata) akan diikuti. fetch_http di http.py memakai pola
+    # yang sama: redirect manual + guard tiap hop.
+    async def _ambil_aman(client, url, headers):
+        """GET dengan pengecekan SSRF di setiap hop redirect."""
+        saat_ini = url
+        for _ in range(_MAX_REDIRECT_HOP):
+            if _is_private_target(saat_ini, allow_private=allow_private):
+                return None
+            resp = await client.get(saat_ini, headers=headers)
+            if resp.status_code in (301, 302, 303, 307, 308):
+                tujuan = resp.headers.get("location")
+                if not tujuan:
+                    return resp
+                saat_ini = str(httpx.URL(saat_ini).join(tujuan))
+                continue
+            return resp
+        return None
+
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
         # First check robots.txt for custom Sitemap directives
         try:
-            robots_resp = await client.get(urljoin(base_origin, "/robots.txt"), headers=req_headers)
-            if robots_resp.status_code == 200:
+            robots_resp = await _ambil_aman(client, urljoin(base_origin, "/robots.txt"),
+                                           req_headers)
+            if robots_resp is not None and robots_resp.status_code == 200:
                 for line in robots_resp.text.splitlines():
                     if line.strip().lower().startswith("sitemap:"):
                         sm = line.split(":", 1)[1].strip()
@@ -73,8 +99,8 @@ async def discover_urls(
             if _is_private_target(sm_url, allow_private=allow_private):
                 continue
             try:
-                resp = await client.get(sm_url, headers=req_headers)
-                if resp.status_code == 200 and resp.text:
+                resp = await _ambil_aman(client, sm_url, req_headers)
+                if resp is not None and resp.status_code == 200 and resp.text:
                     found = _extract_sitemap_urls(resp.text)
                     for u in found:
                         # Check sub-sitemaps if any
