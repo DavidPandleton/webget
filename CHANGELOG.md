@@ -3,6 +3,16 @@
 All notable changes to webget are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Firecrawl results reported the transport status as `status_code`, which is
+  always 200 because a non-200 response is rejected earlier. The field now
+  carries the target page's status (`metadata.statusCode`), so a 403 target no
+  longer looks like a 200. When the target refuses and Firecrawl returns empty
+  markdown, the error now names that status instead of saying only "empty
+  result", which hid whether the page 403d, 404d, or was genuinely blank.
+
 ## [0.15.0] - 2026-09-21
 
 ### Added
