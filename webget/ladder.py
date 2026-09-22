@@ -424,6 +424,15 @@ async def scrape_many(
     if not missing:
         return results
 
+    # max_concurrency datang dari pemanggil API (MCP, skrip), bukan hanya
+    # dari parse_opts CLI. `or` hanya menangkap nilai falsy (0, None), jadi
+    # angka negatif lolos: -5 or 10 == -5, lalu asyncio.Semaphore(-5)
+    # melempar ValueError dan seluruh batch gagal. Divalidasi di sini, di
+    # perbatasan API, supaya kontraknya tidak bergantung pada CLI.
+    if max_concurrency is not None and max_concurrency < 1:
+        raise ValueError(
+            f"max_concurrency must be >= 1, got {max_concurrency}"
+        )
     sem = asyncio.Semaphore(max_concurrency or _DEFAULT_CONCURRENCY)
 
     attempts = {u: 0 for u in missing}

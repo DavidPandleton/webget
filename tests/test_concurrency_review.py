@@ -16,15 +16,20 @@ class TestConcurrencyInvalidValues:
 
     @pytest.mark.parametrize("bad", [0, -1, -100])
     def test_nonpositive_rejected_or_safe(self, fresh_cache, bad):
+        """max_concurrency <= 0 harus ditolak dengan jelas, tidak menggantung.
+
+        Sebelumnya perilakunya bergantung pada nilai:
+            0    -> 0 or 10 == 10  (kebetulan aman, tapi diam-diam)
+            -1   -> -1 or 10 == -1 -> asyncio.Semaphore(-1) -> ValueError
+        Dua jalur berbeda untuk satu kesalahan, dan yang nol tidak pernah
+        dilaporkan meski tidak bermakna. scrape_many sekarang menolak semua
+        nilai <= 0 di perbatasan API dengan pesan yang menyebut nilainya,
+        sehingga CLI, MCP, dan pemanggil langsung mendapat kontrak yang sama.
+        """
         server = fresh_cache
         urls = [server.url(f"/normal?i={i}") for i in range(5)]
-        # Semaphore(0) would deadlock; Semaphore(-1) raises ValueError.
-        # Either behavior is acceptable as long as it does not hang.
-        try:
-            res = asyncio.run(_many(urls, max_concurrency=bad, per_url_timeout=5))
-            assert len(res) == 5  # if it ran, all answered
-        except (TimeoutError, ValueError):
-            pass
+        with pytest.raises(ValueError, match="max_concurrency must be >= 1"):
+            asyncio.run(_many(urls, max_concurrency=bad, per_url_timeout=5))
 
     def test_huge_value_is_safe(self, fresh_cache):
         server = fresh_cache
