@@ -134,6 +134,62 @@ class TestJumlahHasilTidakValid:
         assert cli.parse_opts(["s", "kata", "abc", "--limit", "4"])[8] == 4
 
 
+class TestBatasAtas:
+    """Batas atas disamakan dengan MCP supaya kontraknya satu.
+
+    Sebelumnya MCP membatasi max_chars <= 1_000_000 dan n <= 50, sementara
+    CLI tidak punya batas atas sama sekali. Input yang sama diterima di CLI
+    dan ditolak di MCP, sehingga agent yang belajar salah satu antarmuka
+    terkejut di antarmuka lain.
+    """
+
+    def test_max_chars_dibatasi(self):
+        assert cli.parse_opts(["-n", "1000000"])[3] == 1000000
+        with pytest.raises(ValueError, match="--max-chars must be <= 1000000"):
+            cli.parse_opts(["-n", "1000001"])
+
+    @pytest.mark.parametrize("n", [51, 1000000])
+    def test_jumlah_hasil_dibatasi(self, monkeypatch, n):
+        """Batas 50 sama dengan _MAX_SEARCH_N di MCP."""
+        monkeypatch.setattr(sys, "argv", ["webget", "s", "kata", str(n)])
+        buf = io.StringIO()
+        with pytest.raises(SystemExit) as keluar, redirect_stdout(buf), redirect_stderr(buf):
+            cli.main()
+        assert keluar.value.code == 2
+        assert "result count must be <= 50" in buf.getvalue()
+
+    def test_jumlah_hasil_50_diterima(self, monkeypatch):
+        """Tepi atas tepat di 50 harus diterima, bukan ditolak.
+
+        Dipanggil lewat main() dengan search di-stub, supaya validasi asli
+        yang diuji dan tidak ada jaringan yang tersentuh.
+        """
+        dipanggil = {}
+
+        def _cari_palsu(q, n=5, engine=None):
+            dipanggil["n"] = n
+            return [], {"engine": "brave", "requested": "brave", "failed_over": False}
+
+        monkeypatch.setattr(cli, "_search_with_prov", _cari_palsu)
+        monkeypatch.setattr(sys, "argv", ["webget", "s", "kata", "50"])
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(buf):
+            cli.main()
+        assert dipanggil.get("n") == 50, f"n yang dipakai {dipanggil.get('n')}"
+
+    def test_map_pakai_limit(self):
+        """--limit untuk map adalah batas JUMLAH URL, bukan hasil cari.
+
+        Saat membersihkan sisa percobaan yang gagal, gue sempat menulis
+        `n = 100` di jalur map dan menghapus dukungan --limit. Tes ini
+        mengunci bahwa --limit tetap diteruskan ke map.
+        """
+        import inspect
+
+        src = inspect.getsource(sys.modules["webget.cli"])
+        assert "n = limit or 100" in src, "map tidak lagi memakai --limit"
+
+
 class TestAngkaTidakValidDitolak:
     """parse_opts menolak opsi angka yang salah, dengan pesan menyebut flag."""
 

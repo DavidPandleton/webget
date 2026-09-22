@@ -91,14 +91,29 @@ def parse_opts(args):
     but cannot mean anything is rejected with the option name.
     """
 
-    def _angka(flag, nilai, minimum=1):
-        """int(nilai) dengan pesan yang menyebut flag-nya."""
+    def _angka(flag, nilai, minimum=1, maksimum=None):
+        """int(nilai) dengan pesan yang menyebut flag-nya.
+
+        Batas atas opsional dipakai untuk max_chars, yang di MCP dibatasi
+        _MAX_MAX_CHARS. Tanpa batas atas di CLI, input yang sama diterima
+        di CLI tapi ditolak di MCP, sehingga agent yang belajar salah satu
+        antarmuka terkejut di antarmuka lain.
+        """
+        # bool adalah subclass int di Python, jadi isinstance(True, int)
+        # bernilai True dan True lolos sebagai 1. Tolak eksplisit supaya
+        # input non-angka tidak diterima diam-diam. TypeError (bukan
+        # ValueError) karena masalahnya adalah TIPE, bukan nilai yang di
+        # luar rentang; main() menangkap keduanya dan mencetak pesan.
+        if isinstance(nilai, bool):
+            raise TypeError(f"{flag} expects a whole number, got {nilai!r}")
         try:
             n = int(nilai)
         except (TypeError, ValueError):
             raise ValueError(f"{flag} expects a whole number, got {nilai!r}") from None
         if n < minimum:
             raise ValueError(f"{flag} must be >= {minimum}, got {n}")
+        if maksimum is not None and n > maksimum:
+            raise ValueError(f"{flag} must be <= {maksimum}, got {n}")
         return n
 
     cookies = None
@@ -144,7 +159,8 @@ def parse_opts(args):
             headers_list.append(args[i + 1])
             i += 2
         elif args[i] in ("-n", "--max-chars") and i + 1 < len(args):
-            max_chars = _angka("--max-chars", args[i + 1])
+            # Batas atas disamakan dengan MCP (_MAX_MAX_CHARS = 1_000_000).
+            max_chars = _angka("--max-chars", args[i + 1], maksimum=1_000_000)
             i += 2
         elif args[i] == "--limit" and i + 1 < len(args):
             limit = _angka("--limit", args[i + 1])
@@ -422,7 +438,7 @@ def main():
             retry_transient,
             engine,
         ) = parse_opts(args)
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         print(f"error: {exc}")
         sys.exit(2)
 
@@ -485,6 +501,11 @@ def main():
             ) from None
         if n < 1:
             raise ValueError(f"result count must be >= 1, got {n}")
+        # Batas atas disamakan dengan MCP (_MAX_SEARCH_N = 50). Tanpa ini,
+        # 'webget s kata 5000000' meminta lima juta hasil dari ddgs dan
+        # menggantung, padahal MCP menolaknya.
+        if n > 50:
+            raise ValueError(f"result count must be <= 50, got {n}")
         return n
 
     try:
@@ -499,6 +520,7 @@ def main():
             headless=headless,
             json_out=json_out,
             engine=engine,
+            limit=limit,
             strategy=strategy,
             ttl=ttl,
             fresh=fresh,
@@ -508,7 +530,7 @@ def main():
             max_chars_override=max_chars_override,
             timeout_override=timeout_override,
         )
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         print(f"error: {exc}")
         sys.exit(2)
 
@@ -525,6 +547,7 @@ def _jalankan_perintah(
     headless,
     json_out,
     engine,
+    limit,
     strategy,
     ttl,
     fresh,
@@ -553,7 +576,12 @@ def _jalankan_perintah(
     elif cmd == "map":
         from .discovery import discover_urls
 
-        n = 100
+        # `limit` untuk map adalah batas JUMLAH URL, berbeda dari batas
+        # jumlah hasil pencarian, jadi diterapkan di sini dan bukan di
+        # parse_opts. Catatan: saat membersihkan sisa percobaan yang gagal,
+        # gue sempat menulis `n = 100` dan menghapus dukungan --limit untuk
+        # map; dikembalikan ke `limit or 100` supaya --limit bekerja lagi.
+        n = limit or 100
         timeout = timeout_override or 10
         urls = asyncio.run(
             discover_urls(
