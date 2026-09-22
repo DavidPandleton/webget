@@ -8,10 +8,13 @@ All notable changes to webget are documented here. Format follows
 ### Fixed
 - Firecrawl results reported the transport status as `status_code`, which is
   always 200 because a non-200 response is rejected earlier. The field now
-  carries the target page's status (`metadata.statusCode`), so a 403 target no
-  longer looks like a 200. When the target refuses and Firecrawl returns empty
-  markdown, the error now names that status instead of saying only "empty
-  result", which hid whether the page 403d, 404d, or was genuinely blank.
+  carries the target URL's `metadata.statusCode`, and a rejected target
+  (403/404) surfaces that status instead of a bare "empty result".
+- Firecrawl responses are no longer assumed to be well-shaped: a non-dict
+  `data`/`metadata` degrades cleanly instead of raising `AttributeError`, and
+  a `statusCode` of `Infinity` (which `json.loads` accepts) no longer raises
+  `OverflowError`. The `Infinity` path was found by an independent oc-fleet
+  review.
 
 ## [0.15.0] - 2026-09-21
 

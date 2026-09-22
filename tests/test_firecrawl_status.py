@@ -9,6 +9,7 @@ yang nyembunyiin sebab sebenarnya.
 Tes ini mengunci perilaku yang benar. Semua pakai mock HTTP: tidak ada jaringan.
 """
 import asyncio
+import json
 from unittest.mock import patch
 
 import pytest
@@ -90,6 +91,86 @@ def test_empty_result_tanpa_status_tetap_berfungsi():
     with pytest.raises(RuntimeError) as e:
         asyncio.run(_call(_resp("", omit_status=True)))
     assert str(e.value) == "Firecrawl empty result"
+
+
+def _raw_resp(payload):
+    """Respons dengan body sembarang - untuk menguji bentuk yang tak terduga."""
+
+    class _R:
+        status_code = 200
+
+        def json(self):
+            return payload
+
+    return _R()
+
+
+async def _call_raw(payload):
+    with patch("httpx.AsyncClient") as client:
+        inst = client.return_value.__aenter__.return_value
+
+        async def _post(*a, **k):
+            return _raw_resp(payload)
+
+        inst.post = _post
+        return await firecrawl.fetch_firecrawl("https://contoh.test", 5000, "k", 20)
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [["daftar"], "teks", 42, None, True],
+    ids=["list", "str", "int", "none", "bool"],
+)
+def test_metadata_bukan_mapping_tidak_crash(metadata):
+    """Firecrawl tidak menjamin bentuk; metadata bukan dict harus aman.
+
+    Sebelumnya ini meledak dengan AttributeError karena `.get` dipanggil
+    pada objek yang bukan mapping.
+    """
+    out = asyncio.run(_call_raw({"data": {"markdown": "# Isi", "metadata": metadata}}))
+    assert out["status_code"] == 200
+    assert out["markdown"] == "# Isi"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{"data": ["bukan", "dict"]}, {"data": "teks"}, {"data": 7}, {}],
+    ids=["list", "str", "int", "absent"],
+)
+def test_data_bukan_mapping_tidak_crash(payload):
+    """Sama untuk `data`: bentuk aneh -> error bersih, bukan AttributeError."""
+    with pytest.raises(RuntimeError, match="empty result"):
+        asyncio.run(_call_raw(payload))
+
+
+def test_metadata_absen_tidak_crash():
+    out = asyncio.run(_call_raw({"data": {"markdown": "# Isi"}}))
+    assert out["status_code"] == 200
+
+
+@pytest.mark.parametrize("token", ["Infinity", "-Infinity"], ids=["inf", "-inf"])
+def test_statuscode_infinity_tidak_crash(token):
+    """json.loads menerima token Infinity; int(inf) -> OverflowError.
+
+    Ditemukan oleh review independen oc-fleet. Tanpa OverflowError di
+    except, seluruh fetch meledak walau status-nya cuma field opsional.
+    """
+    with patch("httpx.AsyncClient") as client:
+        inst = client.return_value.__aenter__.return_value
+
+        class _R:
+            status_code = 200
+
+            def json(self):
+                # Lewat teks, persis seperti respons nyata.
+                return json.loads(f'{{"data": {{"markdown": "# Isi", "metadata": {{"statusCode": {token}}}}}}}')
+
+        async def _post(*a, **k):
+            return _R()
+
+        inst.post = _post
+        out = asyncio.run(firecrawl.fetch_firecrawl("https://contoh.test", 5000, "k", 20))
+    assert out["status_code"] == 200  # jatuh ke transport, bukan crash
 
 
 # --- _coerce_status ---

@@ -22,6 +22,18 @@ def firecrawl_key():
     return os.environ.get("WEBGET_FIRECRAWL_KEY", "").strip()
 
 
+def _as_mapping(value) -> dict:
+    """Return `value` if it is a mapping, else an empty dict.
+
+    Firecrawl's response shape is not contractual: `data` has been observed
+    as a list and `metadata` as a non-mapping. Callers here only ever want
+    keys, so anything that is not a mapping is treated as empty rather than
+    handed to `.get` and raised on. `None` and mapping-like objects without
+    `.get` both degrade to empty.
+    """
+    return value if isinstance(value, dict) else {}
+
+
 def _coerce_status(value) -> int | None:
     """Coerce Firecrawl's metadata.statusCode into an int, or None.
 
@@ -34,7 +46,11 @@ def _coerce_status(value) -> int | None:
         return None
     try:
         code = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError matters: json.loads accepts the non-standard
+        # `Infinity`/`-Infinity` tokens, so a body carrying
+        # {"statusCode": Infinity} reaches here as float('inf') and
+        # int(inf) raises. `nan` is already covered by ValueError.
         return None
     return code if 100 <= code <= 599 else None
 
@@ -67,9 +83,9 @@ async def fetch_firecrawl(url, max_chars, key, timeout=30):
         )
         if r.status_code != 200:
             raise RuntimeError(f"Firecrawl HTTP {r.status_code}: {r.text[:200]}")
-        data = r.json().get("data") or {}
+        data = _as_mapping(r.json().get("data"))
         md = data.get("markdown", "") or ""
-        meta = data.get("metadata", {}) or {}
+        meta = _as_mapping(data.get("metadata"))
         # metadata.statusCode is the TARGET page's status, which is what
         # callers mean by status_code. r.status_code is only the transport
         # status to api.firecrawl.dev and is always 200 here (line 51 above
