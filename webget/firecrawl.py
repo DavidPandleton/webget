@@ -22,6 +22,23 @@ def firecrawl_key():
     return os.environ.get("WEBGET_FIRECRAWL_KEY", "").strip()
 
 
+def _coerce_status(value) -> int | None:
+    """Coerce Firecrawl's metadata.statusCode into an int, or None.
+
+    Firecrawl has returned this as an int and (in some responses) as a
+    numeric string. Anything we cannot read as an HTTP status is treated
+    as absent rather than guessed at, so a malformed field degrades to the
+    old behaviour instead of reporting a bogus status.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        code = int(value)
+    except (TypeError, ValueError):
+        return None
+    return code if 100 <= code <= 599 else None
+
+
 async def fetch_firecrawl(url, max_chars, key, timeout=30):
     """Firecrawl escape hatch: POST /v1/scrape, formats markdown.
 
@@ -52,12 +69,25 @@ async def fetch_firecrawl(url, max_chars, key, timeout=30):
             raise RuntimeError(f"Firecrawl HTTP {r.status_code}: {r.text[:200]}")
         data = r.json().get("data") or {}
         md = data.get("markdown", "") or ""
-        if not md:
-            raise RuntimeError("Firecrawl empty result")
         meta = data.get("metadata", {}) or {}
+        # metadata.statusCode is the TARGET page's status, which is what
+        # callers mean by status_code. r.status_code is only the transport
+        # status to api.firecrawl.dev and is always 200 here (line 51 above
+        # rejects anything else), so reporting it told callers nothing.
+        target_status = _coerce_status(meta.get("statusCode"))
+        if not md:
+            # Name the target status when Firecrawl gives us one: a bare
+            # "empty result" hides whether the page 403'd, 404'd, or was
+            # genuinely blank, and that distinction decides what a caller
+            # should do next.
+            if target_status is not None:
+                raise RuntimeError(
+                    f"Firecrawl empty result (target returned HTTP {target_status})"
+                )
+            raise RuntimeError("Firecrawl empty result")
         return {
             "title": meta.get("title", ""),
             "markdown": smart_truncate(md, max_chars),
-            "status_code": r.status_code,
+            "status_code": target_status if target_status is not None else r.status_code,
             "html": "",
         }
