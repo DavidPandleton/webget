@@ -70,7 +70,37 @@ __doc__ = (
 
 
 def parse_opts(args):
-    """Extract options from positional args list."""
+    """Extract options from positional args list.
+
+    Numeric options are validated here, at parse time, because this is the
+    only place with the user's actual input in hand. Previously only
+    --concurrency was guarded (in main(), not here); the rest accepted
+    impossible values and passed them into the system:
+
+        -n -5            max_chars = -5  -> smart_truncate treats a
+                         negative limit as "no limit" and returned 111
+                         chars for 100 chars of text, and it created a
+                         separate dead cache key.
+        -t 0 / -t -1     timeout = 0 / -1, an httpx timeout that can
+                         never succeed.
+        --limit -1 / 0   zero or negative result count.
+        --ttl -1         cache entry that is always expired.
+
+    A syntax error (abc) already raised ValueError before, and that was
+    correct; these guards add the semantic half, so a value that parses
+    but cannot mean anything is rejected with the option name.
+    """
+
+    def _angka(flag, nilai, minimum=1):
+        """int(nilai) dengan pesan yang menyebut flag-nya."""
+        try:
+            n = int(nilai)
+        except (TypeError, ValueError):
+            raise ValueError(f"{flag} expects a whole number, got {nilai!r}") from None
+        if n < minimum:
+            raise ValueError(f"{flag} must be >= {minimum}, got {n}")
+        return n
+
     cookies = None
     headers_list = []
     max_chars = None
@@ -96,7 +126,7 @@ def parse_opts(args):
             profile = args[i + 1]
             i += 2
         elif args[i] == "--concurrency" and i + 1 < len(args):
-            concurrency = int(args[i + 1])
+            concurrency = _angka("--concurrency", args[i + 1])
             i += 2
         elif args[i] in ("-r", "--retry", "--retry-transient"):
             retry_transient = True
@@ -114,19 +144,19 @@ def parse_opts(args):
             headers_list.append(args[i + 1])
             i += 2
         elif args[i] in ("-n", "--max-chars") and i + 1 < len(args):
-            max_chars = int(args[i + 1])
+            max_chars = _angka("--max-chars", args[i + 1])
             i += 2
         elif args[i] == "--limit" and i + 1 < len(args):
-            limit = int(args[i + 1])
+            limit = _angka("--limit", args[i + 1])
             i += 2
         elif args[i] in ("-t", "--timeout") and i + 1 < len(args):
-            timeout = int(args[i + 1])
+            timeout = _angka("--timeout", args[i + 1])
             i += 2
         elif args[i] == "--fresh":
             fresh = True
             i += 1
         elif args[i] == "--ttl" and i + 1 < len(args):
-            ttl = int(args[i + 1])
+            ttl = _angka("--ttl", args[i + 1], minimum=0)
             i += 2
         elif args[i] == "--strategy" and i + 1 < len(args):
             strategy = args[i + 1]
@@ -362,30 +392,41 @@ def main():
         print(__doc__)
         return
 
-    (
-        args,
-        cookies,
-        headers,
-        max_chars_override,
-        timeout_override,
-        fresh,
-        ttl,
-        json_out,
-        limit,
-        strategy,
-        profile,
-        no_cache,
-        headless,
-        concurrency,
-        retry_transient,
-        engine,
-    ) = parse_opts(args)
-
-    if concurrency is not None and concurrency < 1:
-        print("error: --concurrency must be >= 1")
+    # parse_opts raises ValueError for an unusable numeric option, and this
+    # call used to sit outside any try, so the user saw a Python traceback:
+    #
+    #     Traceback (most recent call last):
+    #       File ".../webget/cli.py", line 412, in main
+    #         ) = parse_opts(args)
+    #     ValueError: --max-chars expects a whole number, got 'abc'
+    #
+    # A CLI is a human interface; a traceback is not a message. Report the
+    # option and exit 2 (the same code the now-redundant --concurrency
+    # check used), so the failure reads like every other usage error here.
+    try:
+        (
+            remaining,
+            cookies,
+            headers,
+            max_chars_override,
+            timeout_override,
+            fresh,
+            ttl,
+            json_out,
+            limit,
+            strategy,
+            profile,
+            no_cache,
+            headless,
+            concurrency,
+            retry_transient,
+            engine,
+        ) = parse_opts(args)
+    except ValueError as exc:
+        print(f"error: {exc}")
         sys.exit(2)
 
-    if not args:
+    if not remaining:
         print(__doc__)
         return
 
@@ -395,14 +436,26 @@ def main():
         except OSError as e:
             _warn(f"cannot create profile dir for '{profile}': {e}")
 
-    cmd = args[0]
+    # `remaining` adalah hasil parse_opts: argumen TANPA opsi, dalam urutan
+    # asli. Sebelumnya main() memakai `args` MENTAH di sini, sehingga setiap
+    # opsi yang muncul sebelum perintah atau query ikut terbaca sebagai
+    # perintah/query:
+    #
+    #     webget --json u https://x/   -> args[0] = "--json" (bukan perintah)
+    #     webget s --json uji-kata     -> args[2] = "uji-kata", lalu
+    #                                     int("uji-kata") -> ValueError,
+    #                                     jadi seluruh perintah gagal
+    #
+    # parse_opts sudah menghitung pemisahan itu dengan benar; hasilnya cuma
+    # tidak pernah dipakai (RUF059). Sekarang dipakai.
+    cmd = remaining[0]
     if cmd == "search":
         cmd = "s"
     elif cmd == "fetch":
         cmd = "u"
     elif cmd == "search-fetch":
         cmd = "su"
-    q = args[1] if len(args) > 1 else ""
+    q = remaining[1] if len(remaining) > 1 else ""
 
     if cmd == "login":
         sys.exit(cmd_login(q, profile, headless))
@@ -436,7 +489,10 @@ def main():
         return
 
     if cmd == "s":
-        n = limit or (int(args[2]) if len(args) > 2 else 5)
+        # Argumen ketiga adalah jumlah hasil. Nilai opsi tidak lagi bisa
+        # bocor ke sini, jadi int() hanya melihat token yang memang dimaksud
+        # pengguna, bukan "uji-kata" atau nama opsi lain.
+        n = limit or (int(remaining[2]) if len(remaining) > 2 else 5)
         try:
             results, prov = _search_with_prov(q, n=n, engine=engine)
         except Exception as e:  # noqa: BLE001 - surface a clean error, not a traceback
@@ -503,7 +559,9 @@ def main():
             print(f"{r.get('markdown', '')}\n")
 
     elif cmd == "su":
-        n = limit or (int(args[2]) if len(args) > 2 else 3)
+        # Sama seperti cmd "s": ambil jumlah hasil dari remaining, bukan
+        # args mentah, supaya opsi tidak bocor menjadi nilai int().
+        n = limit or (int(remaining[2]) if len(remaining) > 2 else 3)
         max_chars = max_chars_override or 4000
         timeout = timeout_override or 20
         try:
