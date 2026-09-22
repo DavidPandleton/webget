@@ -104,6 +104,18 @@ async def fetch_firecrawl(url, max_chars, key, timeout=30):
         return {
             "title": meta.get("title", ""),
             "markdown": smart_truncate(md, max_chars),
-            "status_code": target_status if target_status is not None else r.status_code,
+            # Laporkan status halaman target HANYA kalau Firecrawl
+            # benar-benar memberikannya. Jangan jatuh ke r.status_code:
+            # itu status transport ke api.firecrawl.dev, dan baris di atas
+            # sudah menolak apa pun selain 200, jadi nilainya SELALU 200.
+            # Melaporkannya membuat pemanggil melihat 200 untuk halaman
+            # yang statusnya tidak diketahui - angka yang tampak seperti
+            # status target (dan tampak seperti sukses) padahal hanya
+            # menandakan bahwa permintaan ke Firecrawl sendiri berhasil.
+            #
+            # None adalah jawaban yang benar untuk "tidak tahu": pemanggil
+            # bisa membedakannya dari 200. Komentar di atas sudah mengakui
+            # fallback lama "told callers nothing"; sekarang tidak ada lagi.
+            "status_code": target_status,
             "html": "",
         }

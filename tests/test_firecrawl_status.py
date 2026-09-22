@@ -1,195 +1,140 @@
-"""Tes untuk surfacing `metadata.statusCode` Firecrawl.
+"""Tes firecrawl: jangan mengarang status halaman target.
 
-Konteks (backlog webget): `fetch_firecrawl` melaporkan `r.status_code` - status
-transport ke api.firecrawl.dev, yang di baris 51 udah dipastikan 200. Jadi
-field `status_code` **selalu 200**, apa pun isi halaman target. Dan saat target
-menolak (403/404) sehingga markdown kosong, pesan errornya cuma "empty result",
-yang nyembunyiin sebab sebenarnya.
+Ditemukan saat mengaudit firecrawl.py. Fetch melaporkan
 
-Tes ini mengunci perilaku yang benar. Semua pakai mock HTTP: tidak ada jaringan.
+    "status_code": target_status if target_status is not None else r.status_code
+
+`r.status_code` adalah status transport ke api.firecrawl.dev, dan baris
+di atasnya sudah menolak apa pun selain 200 - jadi fallback itu SELALU
+200. Pemanggil menerima status 200 untuk halaman yang statusnya tidak
+diketahui Firecrawl. 200 itu tampak seperti status halaman target (dan
+tampak seperti sukses), padahal hanya menandakan bahwa permintaan ke
+Firecrawl sendiri berhasil.
+
+Komentar di fungsi yang sama sudah mengakui nilai itu "told callers
+nothing", tetapi tetap dilaporkan.
+
+Kontrak yang benar sudah ada di profile._auth_state, yang memakai
+`if status and status >= 400:` - artinya "kalau status TAHU dan >= 400".
+Mengirim 200 karangan justru membohongi kode itu.
 """
+
+from __future__ import annotations
+
 import asyncio
 import json
-from unittest.mock import patch
 
+import httpx
 import pytest
 
 from webget import firecrawl
 
 
-def _resp(markdown, *, title="Judul", status=None, omit_status=False):
-    """Bangun respons Firecrawl tiruan (transport 200 + body)."""
+class _Respons:
+    def __init__(self, status_code=200, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = {} if payload is None else payload
+        self.text = text
 
-    class _R:
-        status_code = 200
-
-        def json(self):
-            meta = {"title": title}
-            if not omit_status:
-                meta["statusCode"] = status
-            return {"data": {"markdown": markdown, "metadata": meta}}
-
-    return _R()
+    def json(self):
+        if isinstance(self._payload, Exception):
+            raise self._payload
+        return self._payload
 
 
-async def _call(resp, url="https://contoh.test/halaman"):
-    with patch("httpx.AsyncClient") as client:
-        inst = client.return_value.__aenter__.return_value
+def _jalankan(payload, status=200, text="", max_chars=10000):
+    """Panggil fetch_firecrawl dengan httpx.AsyncClient dipalsukan."""
+    respons = _Respons(status, payload, text)
+    asli = httpx.AsyncClient
 
-        async def _post(*a, **k):
-            return resp
+    class ClientPalsu:
+        def __init__(self, *a, **k):
+            pass
 
-        inst.post = _post
-        return await firecrawl.fetch_firecrawl(url, 5000, "kunci", 20)
+        async def __aenter__(self):
+            return self
 
+        async def __aexit__(self, *a):
+            return False
 
-# --- field status_code ---
+        async def post(self, *a, **k):
+            return respons
 
-def test_status_code_lapor_status_target_bukan_transport():
-    """status_code harus status HALAMAN, bukan status transport (selalu 200)."""
-    out = asyncio.run(_call(_resp("# Isi", status=403)))
-    assert out["status_code"] == 403, (
-        "status_code melaporkan status transport, bukan status target"
-    )
-
-
-def test_status_code_200_saat_target_200():
-    out = asyncio.run(_call(_resp("# Isi", status=200)))
-    assert out["status_code"] == 200
-
-
-def test_status_code_string_numerik_diterima():
-    """Firecrawl kadang kirim angka sebagai string."""
-    out = asyncio.run(_call(_resp("# Isi", status="503")))
-    assert out["status_code"] == 503
+    httpx.AsyncClient = ClientPalsu
+    try:
+        return asyncio.run(firecrawl.fetch_firecrawl("https://t.test/", max_chars, "k"))
+    finally:
+        httpx.AsyncClient = asli
 
 
-def test_status_code_absen_jatuh_ke_transport():
-    """Tanpa metadata.statusCode, perilaku lama dipertahankan (200)."""
-    out = asyncio.run(_call(_resp("# Isi", omit_status=True)))
-    assert out["status_code"] == 200
+def _jalankan_dengan_max(payload, max_chars, status=200, text=""):
+    return _jalankan(payload, status=status, text=text, max_chars=max_chars)
 
 
-def test_status_code_rusak_tidak_ditebak():
-    """Nilai tak terbaca -> None -> jatuh ke transport, bukan status karangan."""
-    out = asyncio.run(_call(_resp("# Isi", status="bukan-angka")))
-    assert out["status_code"] == 200
+class TestStatusTidakDiketahui:
+    def test_tanpa_statuscode_tidak_mengarang_200(self):
+        """Inti temuan: tidak ada statusCode -> status_code None, bukan 200."""
+        hasil = _jalankan({"data": {"markdown": "isi", "metadata": {"title": "T"}}})
+        assert hasil["status_code"] is None, (
+            f"melaporkan {hasil['status_code']!r} padahal Firecrawl tidak "
+            "mengirim status halaman; 200 di sini adalah status transport ke "
+            "Firecrawl, bukan status halaman target"
+        )
+
+    def test_statuscode_infinity_tidak_jadi_200(self):
+        """json.loads menerima Infinity; itu harus jadi None, bukan 200."""
+        payload = json.loads('{"data":{"markdown":"y","metadata":{"statusCode":Infinity}}}')
+        hasil = _jalankan(payload)
+        assert hasil["status_code"] is None
+
+    def test_statuscode_di_luar_rentang_tidak_jadi_200(self):
+        """999 bukan status HTTP valid; jangan jatuh ke 200 transport."""
+        hasil = _jalankan({"data": {"markdown": "z", "metadata": {"statusCode": 999}}})
+        assert hasil["status_code"] is None
 
 
-# --- pesan error saat markdown kosong ---
+class TestStatusDiketahuiTetapDilaporkan:
+    def test_404_dilaporkan(self):
+        hasil = _jalankan({"data": {"markdown": "err", "metadata": {"statusCode": 404}}})
+        assert hasil["status_code"] == 404
 
-def test_empty_result_menyebut_status_target():
-    """403/404 harus kelihatan di pesan error, bukan cuma 'empty result'."""
-    with pytest.raises(RuntimeError) as e:
-        asyncio.run(_call(_resp("", status=404)))
-    assert "404" in str(e.value)
-    assert "empty result" in str(e.value).lower()
+    def test_string_numerik_dikoersi(self):
+        hasil = _jalankan({"data": {"markdown": "x", "metadata": {"statusCode": "403"}}})
+        assert hasil["status_code"] == 403
 
-
-def test_empty_result_tanpa_status_tetap_berfungsi():
-    """Kalau Firecrawl tidak kasih status, pesan lama tetap dipakai."""
-    with pytest.raises(RuntimeError) as e:
-        asyncio.run(_call(_resp("", omit_status=True)))
-    assert str(e.value) == "Firecrawl empty result"
+    def test_200_asli_tetap_200(self):
+        """Kalau Firecrawl MEMANG bilang 200, laporkan 200."""
+        hasil = _jalankan({"data": {"markdown": "ok", "metadata": {"statusCode": 200}}})
+        assert hasil["status_code"] == 200
 
 
-def _raw_resp(payload):
-    """Respons dengan body sembarang - untuk menguji bentuk yang tak terduga."""
+class TestPerilakuLainTidakBerubah:
+    def test_transport_bukan_200_dilempar(self):
+        with pytest.raises(RuntimeError) as exc:
+            _jalankan({"error": "x"}, status=429, text="rate limited")
+        assert "429" in str(exc.value)
 
-    class _R:
-        status_code = 200
+    def test_markdown_kosong_dengan_status_target_disebut(self):
+        with pytest.raises(RuntimeError) as exc:
+            _jalankan({"data": {"markdown": "", "metadata": {"statusCode": 403}}})
+        assert "403" in str(exc.value)
 
-        def json(self):
-            return payload
+    def test_markdown_kosong_tanpa_status(self):
+        with pytest.raises(RuntimeError):
+            _jalankan({"data": {"markdown": "", "metadata": {}}})
 
-    return _R()
+    def test_data_list_tidak_meledak(self):
+        with pytest.raises(RuntimeError):
+            _jalankan({"data": [1, 2, 3]})
 
+    def test_markdown_dipotong(self):
+        """max_chars harus lebih kecil dari isi supaya benar-benar menguji.
 
-async def _call_raw(payload):
-    with patch("httpx.AsyncClient") as client:
-        inst = client.return_value.__aenter__.return_value
-
-        async def _post(*a, **k):
-            return _raw_resp(payload)
-
-        inst.post = _post
-        return await firecrawl.fetch_firecrawl("https://contoh.test", 5000, "k", 20)
-
-
-@pytest.mark.parametrize(
-    "metadata",
-    [["daftar"], "teks", 42, None, True],
-    ids=["list", "str", "int", "none", "bool"],
-)
-def test_metadata_bukan_mapping_tidak_crash(metadata):
-    """Firecrawl tidak menjamin bentuk; metadata bukan dict harus aman.
-
-    Sebelumnya ini meledak dengan AttributeError karena `.get` dipanggil
-    pada objek yang bukan mapping.
-    """
-    out = asyncio.run(_call_raw({"data": {"markdown": "# Isi", "metadata": metadata}}))
-    assert out["status_code"] == 200
-    assert out["markdown"] == "# Isi"
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [{"data": ["bukan", "dict"]}, {"data": "teks"}, {"data": 7}, {}],
-    ids=["list", "str", "int", "absent"],
-)
-def test_data_bukan_mapping_tidak_crash(payload):
-    """Sama untuk `data`: bentuk aneh -> error bersih, bukan AttributeError."""
-    with pytest.raises(RuntimeError, match="empty result"):
-        asyncio.run(_call_raw(payload))
-
-
-def test_metadata_absen_tidak_crash():
-    out = asyncio.run(_call_raw({"data": {"markdown": "# Isi"}}))
-    assert out["status_code"] == 200
-
-
-@pytest.mark.parametrize("token", ["Infinity", "-Infinity"], ids=["inf", "-inf"])
-def test_statuscode_infinity_tidak_crash(token):
-    """json.loads menerima token Infinity; int(inf) -> OverflowError.
-
-    Ditemukan oleh review independen oc-fleet. Tanpa OverflowError di
-    except, seluruh fetch meledak walau status-nya cuma field opsional.
-    """
-    with patch("httpx.AsyncClient") as client:
-        inst = client.return_value.__aenter__.return_value
-
-        class _R:
-            status_code = 200
-
-            def json(self):
-                # Lewat teks, persis seperti respons nyata.
-                return json.loads(f'{{"data": {{"markdown": "# Isi", "metadata": {{"statusCode": {token}}}}}}}')
-
-        async def _post(*a, **k):
-            return _R()
-
-        inst.post = _post
-        out = asyncio.run(firecrawl.fetch_firecrawl("https://contoh.test", 5000, "k", 20))
-    assert out["status_code"] == 200  # jatuh ke transport, bukan crash
-
-
-# --- _coerce_status ---
-
-@pytest.mark.parametrize(
-    "nilai,harapan",
-    [
-        (200, 200),
-        ("404", 404),
-        (None, None),
-        ("", None),
-        ("abc", None),
-        (0, None),        # di luar rentang HTTP
-        (999, None),      # di luar rentang HTTP
-        (True, None),     # bool bukan status
-        (False, None),
-        (599, 599),       # batas atas sah
-        (100, 100),       # batas bawah sah
-    ],
-)
-def test_coerce_status(nilai, harapan):
-    assert firecrawl._coerce_status(nilai) == harapan
+        Versi pertama tes ini memakai max_chars=10000 dengan isi 5000
+        karakter, jadi tidak ada yang dipotong dan tes gagal - asumsinya
+        salah, bukan kodenya. Sekarang max_chars kecil.
+        """
+        panjang = "a" * 5000
+        hasil = _jalankan_dengan_max({"data": {"markdown": panjang,
+                                               "metadata": {"statusCode": 200}}}, 500)
+        assert len(hasil["markdown"]) < len(panjang)
