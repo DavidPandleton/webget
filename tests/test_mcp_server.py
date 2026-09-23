@@ -33,7 +33,7 @@ def test_tools_listed():
 
     # order is not a contract; membership is
     assert sorted(_run(run())) == sorted(
-        ["search", "fetch", "search_fetch", "list_profiles", "login", "map"]
+        ["search", "fetch", "search_fetch", "list_profiles", "login", "map", "crawl"]
     )
 
 
