@@ -30,6 +30,7 @@ from .cache import (
     parse_headers,
 )
 from .cli import main, parse_opts
+from .crawler import crawl_site
 from .discovery import discover_urls
 from .extraction import ExtractionResult, extract_structured
 from .firecrawl import fetch_firecrawl, firecrawl_key
@@ -154,6 +155,7 @@ __all__ = [
     "_write_json",
     "cache_get",
     "cache_put",
+    "crawl_site",
     "discover_urls",
     "extract_structured",
     "fetch_firecrawl",

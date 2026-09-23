@@ -88,6 +88,12 @@ class CrawlFrontier:
                 ON frontier(status, depth, id);
             """
         )
+        # Recover claims left behind by a crashed process so resume does not
+        # strand URLs permanently in ``in_progress``.
+        self._db.execute(
+            "UPDATE frontier SET status='pending', updated_at=unixepoch('subsec') "
+            "WHERE status='in_progress'"
+        )
 
     @staticmethod
     def _domain_name(value: str) -> str:
