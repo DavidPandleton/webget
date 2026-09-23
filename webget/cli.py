@@ -14,6 +14,7 @@ import os
 import sys
 
 from .cache import parse_cookie_file, parse_headers
+from .crawler import crawl_site
 from .ladder import scrape_many
 from .profile import (
     _fmt_age,
@@ -40,6 +41,7 @@ __doc__ = (
     "  webget logout URL --profile X  Clear auth for one domain, keep the rest\n"
     "  webget doctor [--json]         Show which browsers/tools are usable here\n"
     "  webget map URL [--limit N]     Discover URLs via sitemaps and robots.txt\n"
+    "  webget crawl URL DB [--limit N] Bounded resumable crawl to SQLite\n"
     "Aliases: search = s, fetch = u, search-fetch = su\n"
     "\n"
     "Options:\n"
@@ -565,6 +567,23 @@ def _jalankan_perintah(
     """
     if cmd == "login":
         sys.exit(cmd_login(q, profile, headless))
+    elif cmd == "crawl":
+        if len(remaining) < 3:
+            raise ValueError("crawl expects URL and frontier SQLite path")
+        result = asyncio.run(
+            crawl_site(
+                q,
+                remaining[2],
+                max_pages=limit or 100,
+                timeout=timeout_override or 20,
+                strategy=strategy,
+            )
+        )
+        if json_out:
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+        else:
+            print(f"done={result['stats'].get('done', 0)} failed={result['stats'].get('failed', 0)}")
+        return
     elif cmd == "profiles":
         cmd_profiles(json_out)
         return
