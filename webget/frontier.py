@@ -54,7 +54,10 @@ class CrawlFrontier:
         allowed_domains: set[str] | None = None,
         max_depth: int | None = None,
         max_pages: int | None = None,
+        lease_timeout: float = 0,
     ):
+        if not isinstance(lease_timeout, (int, float)) or lease_timeout < 0:
+            raise ValueError("lease_timeout must be non-negative")
         if max_depth is not None and (not isinstance(max_depth, int) or max_depth < 0):
             raise ValueError("max_depth must be a non-negative integer or None")
         if max_pages is not None and (not isinstance(max_pages, int) or max_pages < 1):
@@ -65,6 +68,7 @@ class CrawlFrontier:
         }
         self.max_depth = max_depth
         self.max_pages = max_pages
+        self.lease_timeout = float(lease_timeout)
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
@@ -92,7 +96,8 @@ class CrawlFrontier:
         # strand URLs permanently in ``in_progress``.
         self._db.execute(
             "UPDATE frontier SET status='pending', updated_at=unixepoch('subsec') "
-            "WHERE status='in_progress'"
+            "WHERE status='in_progress' AND (? = 0 OR updated_at < unixepoch('subsec') - ?)",
+            (self.lease_timeout, self.lease_timeout),
         )
 
     @staticmethod

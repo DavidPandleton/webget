@@ -36,7 +36,13 @@ async def crawl_site(
     if not isinstance(max_depth, int) or max_depth < 0:
         raise ValueError("max_depth must be a non-negative integer")
     seed = seed_url
-    with CrawlFrontier(frontier_path, allowed_domains={_host(seed)}, max_depth=max_depth, max_pages=max_pages) as frontier:
+    with CrawlFrontier(
+        frontier_path,
+        allowed_domains={_host(seed)},
+        max_depth=max_depth,
+        max_pages=max_pages,
+        lease_timeout=max(60, timeout * 2),
+    ) as frontier:
         _ensure_pages_table(frontier_path)
         frontier.enqueue(seed)
         while True:

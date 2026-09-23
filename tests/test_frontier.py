@@ -34,3 +34,15 @@ def test_frontier_domain_and_page_budget(tmp_path):
         assert len(frontier.claim(10)) == 1
         assert frontier.enqueue("https://example.com/c")
         assert frontier.claim(10) == []
+
+
+def test_stale_lease_is_recovered(tmp_path):
+    path = tmp_path / "stale.db"
+    with CrawlFrontier(path, lease_timeout=1) as frontier:
+        frontier.enqueue("https://example.com/")
+        item = frontier.claim()[0]
+        frontier._db.execute(
+            "UPDATE frontier SET updated_at=unixepoch('subsec') - 10 WHERE id=?", (item.id,)
+        )
+    with CrawlFrontier(path, lease_timeout=1) as reopened:
+        assert reopened.claim()[0].url == "https://example.com/"
