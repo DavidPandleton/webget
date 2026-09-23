@@ -32,6 +32,7 @@ from .cache import (
 from .cli import main, parse_opts
 from .discovery import discover_urls
 from .firecrawl import fetch_firecrawl, firecrawl_key
+from .frontier import CrawlFrontier, FrontierItem, normalize_url
 from .http import (
     MAX_RESPONSE_BYTES,
     ResponseTooLarge,
@@ -106,7 +107,9 @@ __all__ = [
     "_DEFAULT_CONCURRENCY",
     "_PROFILE_NAME_RE",
     "_STRATEGY_MEMORY_TTL",
+    "CrawlFrontier",
     "DdgsSearchProvider",
+    "FrontierItem",
     "ResponseTooLarge",
     "SSRFError",
     "SearchProvider",
@@ -156,6 +159,7 @@ __all__ = [
     "list_profiles",
     "load_profile_cookies",
     "main",
+    "normalize_url",
     "parse_cookie_file",
     "parse_headers",
     "parse_opts",
