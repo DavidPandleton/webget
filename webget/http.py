@@ -183,6 +183,45 @@ def _pdf_to_text(body):
     return text
 
 
+def _satu_baris(teks):
+    """Ratakan teks feed pihak ketiga jadi SATU baris.
+
+    Judul dan deskripsi datang dari feed yang tidak kita kendalikan. Kalau
+    memuat newline, struktur markdown yang kita susun rusak:
+
+        - [Judul dengan
+        baris baru](https://x.test/b)
+          > Baris pertama deskripsi.
+        Baris kedua yang keluar dari blok kutipan.
+
+    Baris pertama kehilangan penutup linknya, sehingga yang seharusnya
+    link jadi teks biasa, dan baris kedua keluar dari blok. Di MCP agent
+    membaca struktur itu sebagai kenyataan.
+
+    Semua whitespace diratakan jadi satu spasi: judul dan deskripsi feed
+    tidak butuh baris internal, dan satu spasi mempertahankan keterbacaan.
+    """
+    return " ".join(teks.split())
+
+
+def _potong_kata(teks, batas):
+    """Potong di batas kata supaya tidak memutus kata di tengah.
+
+    [:200] sebelumnya memotong tepat di karakter ke-200, sehingga deskripsi
+    berakhir di tengah kata ("...kata kata kat"). Pemotongan di spasi
+    terdekat menghasilkan teks yang tidak terlihat rusak.
+    """
+    if len(teks) <= batas:
+        return teks
+    potong = teks[:batas]
+    spasi = potong.rfind(" ")
+    # Kalau tidak ada spasi sama sekali (satu kata sangat panjang), tetap
+    # potong di batas karakter; lebih baik terpotong daripada tak terbatas.
+    if spasi > batas // 2:
+        potong = potong[:spasi]
+    return potong.rstrip() + " ..."
+
+
 def _feed_to_links(body):
     """Convert RSS/Atom XML bytes to a markdown link list."""
     import xml.etree.ElementTree as _ET
@@ -193,19 +232,19 @@ def _feed_to_links(body):
         return body.decode("utf-8", errors="replace").strip()
     lines = []
     for item in root.iter("item"):  # RSS
-        title = (item.findtext("title") or "").strip()
+        title = _satu_baris(item.findtext("title") or "")
         link = (item.findtext("link") or "").strip()
-        desc = (item.findtext("description") or "").strip()
+        desc = _satu_baris(item.findtext("description") or "")
         if title and link:
             lines.append(f"- [{title}]({link})")
         elif title:
             lines.append(f"- {title}")
         if desc:
-            lines.append(f"  > {desc[:200]}")
+            lines.append(f"  > {_potong_kata(desc, 200)}")
     ns = {"atom": "http://www.w3.org/2005/Atom"}
     for entry in root.findall(".//atom:entry", ns):  # Atom
         t = entry.find("atom:title", ns)
-        title = (t.text or "").strip() if t is not None else ""
+        title = _satu_baris(t.text or "") if t is not None else ""
         link = ""
         for l in entry.findall("atom:link", ns):
             href = (l.get("href") or "").strip()
@@ -213,13 +252,13 @@ def _feed_to_links(body):
                 link = href
                 break
         s = entry.find("atom:summary", ns)
-        desc = (s.text or "").strip() if s is not None else ""
+        desc = _satu_baris(s.text or "") if s is not None else ""
         if title and link:
             lines.append(f"- [{title}]({link})")
         elif title:
             lines.append(f"- {title}")
         if desc:
-            lines.append(f"  > {desc[:200]}")
+            lines.append(f"  > {_potong_kata(desc, 200)}")
     if lines:
         return "\n".join(lines)
     return body.decode("utf-8", errors="replace").strip()
