@@ -130,10 +130,26 @@ webget s "rust async runtime" --json      # machine-readable, includes engine pr
 webget u https://example.com              # scrape (auto: http -> crawl4ai)
 webget su "llm inference" 5               # search + scrape top 5, parallel
 cat urls.txt | webget u -                 # batch scrape, one browser instance
+webget crawl https://example.com crawl.db --limit 20 --json  # resumable local crawl
 webget fetch https://example.com --json   # machine-readable result
 ```
 
 Long aliases: `search` = `s`, `fetch` = `u`, `search-fetch` = `su`.
+
+### Resumable local crawl
+
+The crawler is local and bounded: it uses SQLite for durable frontier state
+and page results, stays on the seed hostname, and can resume after a process
+restart. It does not require Docker, Redis, Postgres, or a browser.
+
+```bash
+webget crawl https://example.com ./crawl.db --limit 20 --timeout 20 --json
+```
+
+The same operation is available through Python as `webget.crawl_site(...)` and
+through MCP as the `crawl` tool. Results can also be exported with the Python
+API to JSONL or Markdown. Stale in-progress leases are recovered using a
+bounded timeout.
 
 ## Search engines
 
@@ -158,6 +174,31 @@ warning: unknown search engine(s): bogus - using auto
 
 Unknown names degrade to `auto` with a warning instead of failing, so a
 typo never kills a search.
+
+### Optional SearXNG provider
+
+SearXNG is not bundled or required. Point the optional HTTP adapter at an
+existing instance using an environment variable:
+
+```bash
+export WEBGET_SEARXNG_URL=http://localhost:8080
+```
+
+Then use the provider from Python:
+
+```python
+from webget import SearxngSearchProvider
+from webget.search import search_with_provenance
+
+provider = SearxngSearchProvider()
+results, provenance = search_with_provenance(
+    "query", n=5, engine="searxng", provider=provider
+)
+```
+
+The adapter calls `/search?format=json`, normalizes result fields, and keeps
+the usual per-call provenance. Live availability depends on the configured
+SearXNG instance; the core package does not start one.
 
 **Failover is automatic.** If the engine you named fails, or returns zero
 results, webget tries the remaining engines until a time budget is spent
