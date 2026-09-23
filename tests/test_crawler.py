@@ -37,7 +37,8 @@ def test_crawl_site_resumes_frontier_and_exports(tmp_path, monkeypatch):
     assert out["stats"]["done"] == 2
     rows = [json.loads(line) for line in jsonl.read_text().splitlines()]
     assert [row["url"] for row in rows] == [seed, child]
-    assert "# Crawl results" in markdown.read_text()
+    assert rows[0]["markdown"] == "ok"
+    assert "ok" in markdown.read_text()
 
 
 def test_crawl_site_records_failures(monkeypatch, tmp_path):

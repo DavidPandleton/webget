@@ -321,6 +321,48 @@ async def map(
         return [f"error: {e}"]
 
 
+@mcp.tool()
+async def crawl(
+    url: str,
+    frontier_path: str,
+    max_pages: int = 100,
+    max_depth: int = 1,
+    discovery_limit: int = 100,
+    timeout: int = 20,
+    strategy: str = "auto",
+    output_jsonl: str | None = None,
+    output_markdown: str | None = None,
+) -> dict:
+    """Run a bounded resumable crawl backed by a local SQLite frontier."""
+    if strategy not in _VALID_STRATEGIES:
+        return {"error": f"unknown strategy: {strategy}", "stats": {}, "results": []}
+    for name, value, lo, hi in (
+        ("max_pages", max_pages, 1, 1000),
+        ("max_depth", max_depth, 0, 10),
+        ("discovery_limit", discovery_limit, 1, 1000),
+        ("timeout", timeout, 1, _MAX_TIMEOUT),
+    ):
+        err = _clamp(name, value, lo, hi)
+        if err:
+            return {"error": err, "stats": {}, "results": []}
+    if not frontier_path.strip():
+        return {"error": "frontier_path must be non-empty", "stats": {}, "results": []}
+    try:
+        return await wg.crawl_site(
+            url,
+            frontier_path,
+            max_pages=max_pages,
+            max_depth=max_depth,
+            discovery_limit=discovery_limit,
+            timeout=timeout,
+            strategy=strategy,
+            output_jsonl=output_jsonl,
+            output_markdown=output_markdown,
+        )
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e), "stats": {}, "results": []}
+
+
 def main() -> None:
     mcp.run()
 

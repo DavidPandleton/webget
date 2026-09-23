@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ async def crawl_site(
         raise ValueError("max_depth must be a non-negative integer")
     seed = seed_url
     with CrawlFrontier(frontier_path, allowed_domains={_host(seed)}, max_depth=max_depth, max_pages=max_pages) as frontier:
+        _ensure_pages_table(frontier_path)
         frontier.enqueue(seed)
         while True:
             batch = frontier.claim(min(10, max_pages))
@@ -45,6 +47,7 @@ async def crawl_site(
             scraped = await scrape_many(urls, per_url_timeout=timeout, strategy=strategy)
             for item in batch:
                 result = scraped.get(item.url, {"status": "error", "error": "missing result"})
+                _save_page(frontier_path, item.url, item.depth, result)
                 if result.get("status") == "success":
                     frontier.complete(item.url)
                     if item.depth < max_depth:
@@ -74,16 +77,77 @@ def _host(url: str) -> str:
 
 
 def _read_results(frontier_path: str | Path) -> list[dict[str, Any]]:
-    import sqlite3
-
     db = sqlite3.connect(str(frontier_path))
     db.row_factory = sqlite3.Row
     try:
         rows = db.execute(
-            "SELECT url, depth, parent_url, status, attempts, error "
-            "FROM frontier ORDER BY depth, id"
+            """
+            SELECT f.url, f.depth, f.parent_url, f.status, f.attempts, f.error,
+                   p.title, p.markdown, p.metadata, p.method, p.auth, p.reasons
+            FROM frontier AS f
+            LEFT JOIN pages AS p ON p.url = f.url
+            ORDER BY f.depth, f.id
+            """
         ).fetchall()
-        return [dict(row) for row in rows]
+        results = [dict(row) for row in rows]
+        for row in results:
+            for key in ("metadata", "auth", "reasons"):
+                if row.get(key):
+                    try:
+                        row[key] = json.loads(row[key])
+                    except (TypeError, json.JSONDecodeError):
+                        pass
+        return results
+    finally:
+        db.close()
+
+
+def _ensure_pages_table(path: str | Path) -> None:
+    db = sqlite3.connect(str(path))
+    try:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pages (
+                url TEXT PRIMARY KEY,
+                depth INTEGER NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                markdown TEXT NOT NULL DEFAULT '',
+                metadata TEXT,
+                method TEXT NOT NULL DEFAULT '',
+                auth TEXT,
+                reasons TEXT
+            )
+            """
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _save_page(path: str | Path, url: str, depth: int, result: dict[str, Any]) -> None:
+    db = sqlite3.connect(str(path))
+    try:
+        db.execute(
+            """
+            INSERT INTO pages(url, depth, title, markdown, metadata, method, auth, reasons)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(url) DO UPDATE SET
+                depth=excluded.depth, title=excluded.title, markdown=excluded.markdown,
+                metadata=excluded.metadata, method=excluded.method, auth=excluded.auth,
+                reasons=excluded.reasons
+            """,
+            (
+                url,
+                depth,
+                result.get('title', ''),
+                result.get('markdown', ''),
+                json.dumps(result.get('metadata'), ensure_ascii=False),
+                result.get('method', ''),
+                json.dumps(result.get('auth'), ensure_ascii=False),
+                json.dumps(result.get('reasons'), ensure_ascii=False),
+            ),
+        )
+        db.commit()
     finally:
         db.close()
 
@@ -100,6 +164,10 @@ def _write_markdown(path: str | Path, results: list[dict[str, Any]]) -> None:
     lines = ["# Crawl results", ""]
     for row in results:
         lines.append(f"- [{row['status']}]({row['url']}) depth={row['depth']}")
+        if row.get("title"):
+            lines.append(f"  - **{row['title']}**")
+        if row.get("markdown"):
+            lines.extend(["", row["markdown"], ""])
         if row.get("error"):
             lines.append(f"  - Error: {row['error']}")
     target.write_text("\n".join(lines) + "\n")
