@@ -345,7 +345,11 @@ standalone with `webget-mcp` (stdio transport) or `python webget_mcp.py`.
 ### Breaking change in 0.13.0: search returns an object, not a list
 
 `search` and `search_fetch` used to return a bare JSON array of results.
-They now return an object, because a list has nowhere to carry provenance:
+They now return an object, because a list has nowhere to carry provenance.
+The MCP result-count argument is `limit` (default 5 for `search`, 3 for
+`search_fetch`), matching the CLI vocabulary. The legacy MCP argument `n`
+remains accepted as an explicit compatibility alias; when both are supplied,
+`n` wins. The Python API continues to use `n` for backward compatibility.
 
 ```jsonc
 // <= 0.12.1  ->  a list

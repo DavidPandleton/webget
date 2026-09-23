@@ -28,7 +28,7 @@ class TestMCPSearchEngine:
             )
 
         monkeypatch.setattr(webget_mcp.wg, "search_with_provenance", fake_prov)
-        out = _run(webget_mcp.search("q", n=2, engine="brave"))
+        out = _run(webget_mcp.search("q", limit=2, engine="brave"))
         assert captured["engine"] == "brave"
         assert out["results"][0]["url"] == "https://m.example"
 
@@ -60,7 +60,7 @@ class TestMCPSearchFetchEngine:
 
         monkeypatch.setattr(webget_mcp.wg, "search_with_provenance", fake_prov)
         monkeypatch.setattr(webget_mcp.wg, "scrape_many", fake_scrape_many)
-        out = _run(webget_mcp.search_fetch("q", n=1, engine="mojeek"))
+        out = _run(webget_mcp.search_fetch("q", limit=1, engine="mojeek"))
         assert captured["engine"] == "mojeek"
         assert out["results"][0]["search_title"] == "T"
         assert out["results"][0]["status"] == "success"

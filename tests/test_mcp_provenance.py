@@ -30,7 +30,7 @@ class TestMCPSearchFetchProvenance:
 
         monkeypatch.setattr(webget_mcp.wg, "search_with_provenance", fake_prov)
         monkeypatch.setattr(webget_mcp.wg, "scrape_many", fake_scrape_many)
-        out = _run(webget_mcp.search_fetch("q", n=1, engine="google"))
+        out = _run(webget_mcp.search_fetch("q", limit=1, engine="google"))
         assert out["engine"] == "brave"
         assert out["requested_engine"] == "google"
         assert out["failed_over"] is True
@@ -52,7 +52,7 @@ class TestMCPSearchProvenance:
             )
 
         monkeypatch.setattr(webget_mcp.wg, "search_with_provenance", fake_prov)
-        out = _run(webget_mcp.search("q", n=2, engine="google"))
+        out = _run(webget_mcp.search("q", limit=2, engine="google"))
         assert out["engine"] == "brave"
         assert out["requested_engine"] == "google"
         assert out["failed_over"] is True
@@ -85,6 +85,6 @@ class TestMCPSearchProvenance:
         assert out["engine"] == "brave"  # best-effort, matches the request
 
     def test_clamp_error_still_returns_error_shape(self):
-        out = _run(webget_mcp.search("q", n=10**9))
+        out = _run(webget_mcp.search("q", limit=10**9))
         assert isinstance(out, dict)
         assert "error" in out

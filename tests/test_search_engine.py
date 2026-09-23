@@ -14,7 +14,7 @@ where the lookup actually happens (inside search(), `from ddgs import DDGS`).
 from typing import ClassVar
 
 import webget_cli as webget
-from webget.search import _resolve_engine, known_engines
+from webget.search import SearchProvider, _resolve_engine, known_engines, search_with_provenance
 
 
 class FakeDDGS:
@@ -89,6 +89,34 @@ class TestSearchEngineValidation:
         assert "duckduckgo" in names
         assert "brave" in names
         assert len(names) >= 5
+
+
+class FakeProvider:
+    def __init__(self):
+        self.calls = []
+
+    def known_engines(self):
+        return ["local-a", "local-b"]
+
+    def text(self, query, max_results, **kwargs):
+        self.calls.append((query, max_results, kwargs))
+        return [{"title": "local", "href": "https://local.example/", "body": "ok"}]
+
+
+class TestSearchProvider:
+    def test_custom_provider_is_normalized_without_ddgs(self):
+        provider = FakeProvider()
+        assert isinstance(provider, SearchProvider)
+
+        results, provenance = search_with_provenance(
+            "q", n=2, engine="local-a", provider=provider
+        )
+
+        assert results == [
+            {"title": "local", "url": "https://local.example/", "snippet": "ok"}
+        ]
+        assert provenance["engine"] == "local-a"
+        assert provider.calls == [("q", 2, {"backend": "local-a"})]
 
 
 class TestResolveEngine:

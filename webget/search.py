@@ -17,6 +17,36 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from typing import Protocol, runtime_checkable
+
+
+@runtime_checkable
+class SearchProvider(Protocol):
+    """Minimal backend contract used by the normalized search pipeline."""
+
+    def known_engines(self) -> list[str]:
+        """Return backend names accepted by ``engine`` selection."""
+        ...
+
+    def text(self, query: str, max_results: int, **kwargs) -> list[dict]:
+        """Return raw result mappings with title, href, and body fields."""
+        ...
+
+
+class DdgsSearchProvider:
+    """Default embedded provider; imports ddgs only when a search runs."""
+
+    def known_engines(self) -> list[str]:
+        return known_engines()
+
+    def text(self, query: str, max_results: int, **kwargs) -> list[dict]:
+        from ddgs import DDGS
+
+        return DDGS().text(query, max_results=max_results, **kwargs)
+
+
+def _default_provider() -> SearchProvider:
+    return DdgsSearchProvider()
 
 # Failover is bounded by TIME, not by a count of attempts.
 #
@@ -64,7 +94,7 @@ def known_engines():
         return []
 
 
-def _resolve_engine(engine):
+def _resolve_engine(engine, provider: SearchProvider | None = None):
     """Validate a user engine spec, returning a safe ``backend`` value.
 
     ``None``/``""`` -> ``None`` (ddgs default = auto, unchanged behavior).
@@ -79,7 +109,7 @@ def _resolve_engine(engine):
     if engine in ("auto", "all"):
         return "auto"
     names = [e.strip() for e in engine.split(",") if e.strip()]
-    known = set(known_engines())
+    known = set(provider.known_engines() if provider is not None else known_engines())
     if not known:
         # registry unavailable: trust ddgs to warn + fall back to auto
         return engine
@@ -109,7 +139,7 @@ def _warn(msg):
         pass
 
 
-def _failover_chain(first):
+def _failover_chain(first, provider: SearchProvider | None = None):
     """Ordered engines to try when `first` fails: the rest of the registry.
 
     Ordered by LEARNED HEALTH (webget.health), best first, with a stable
@@ -153,7 +183,9 @@ class SearchError(RuntimeError):
         self.provenance = provenance or {}
 
 
-def search_with_provenance(query, n=5, engine=None):
+def search_with_provenance(
+    query, n=5, engine=None, provider: SearchProvider | None = None
+):
     """Search and return ``(results, provenance)``.
 
     Provenance is per-CALL, not per-result, because ddgs merges every
@@ -172,10 +204,10 @@ def search_with_provenance(query, n=5, engine=None):
                         rather than registry order, so a caller debugging a
                         surprising order knows where it came from
     """
-    from ddgs import DDGS
+    provider = provider or _default_provider()
 
     requested = engine if engine else "auto"
-    backend = _resolve_engine(engine)
+    backend = _resolve_engine(engine, provider)
     kwargs = {} if backend is None else {"backend": backend}
     tried = []
     first_error = None
@@ -207,7 +239,7 @@ def search_with_provenance(query, n=5, engine=None):
         tried.append(label)
         t0 = _time.perf_counter()
         try:
-            rows = list(DDGS().text(query, max_results=n, **kw))
+            rows = list(provider.text(query, max_results=n, **kw) or [])
         except Exception:
             # A raise is a data point too: this engine is unhealthy right now.
             _record(label, False, _time.perf_counter() - t0)
@@ -277,9 +309,9 @@ def search_with_provenance(query, n=5, engine=None):
     except Exception as e:  # noqa: BLE001 - failover is the point
         first_error = e
 
-    chain = _failover_chain(backend)
+    chain = _failover_chain(backend, provider)
     if backend in (None, "auto"):
-        chain = known_engines()
+        chain = provider.known_engines()
 
     # Walk the chain until the time budget is spent, but never stop before
     # MIN_FAILOVER_ATTEMPTS. `deadline` starts now rather than at the top of
@@ -325,7 +357,7 @@ def search_with_provenance(query, n=5, engine=None):
     return [], prov
 
 
-def search(query, n=5, engine=None):
+def search(query, n=5, engine=None, provider: SearchProvider | None = None):
     """Search the web via the ddgs metasearch and normalize the results.
 
     engine: None/"auto"/"all" = every engine (ddgs default), or a
@@ -345,7 +377,7 @@ def search(query, n=5, engine=None):
     ``search_with_provenance`` when you also need to know which engine
     actually answered (relevant since failover can substitute another one).
     """
-    results, _ = search_with_provenance(query, n=n, engine=engine)
+    results, _ = search_with_provenance(query, n=n, engine=engine, provider=provider)
     return results
 
 

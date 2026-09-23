@@ -29,7 +29,7 @@ class TestMcpMetadataExposure:
                 {"requested": "auto", "engine": "brave", "failed_over": False},
             ),
         )
-        out = asyncio.run(webget_mcp.search_fetch("q", n=1, no_cache=True))
+        out = asyncio.run(webget_mcp.search_fetch("q", limit=1, no_cache=True))
         assert set(out["results"][0]["metadata"]) == {
             "author",
             "published_at",

@@ -78,7 +78,14 @@ from .profile import (
     profile_exists,
     profile_state_path,
 )
-from .search import _read_json, _write_json, search, search_with_provenance
+from .search import (
+    DdgsSearchProvider,
+    SearchProvider,
+    _read_json,
+    _write_json,
+    search,
+    search_with_provenance,
+)
 from .ssrf import (
     SSRFError,
     _guard_browser_routes,
@@ -99,8 +106,10 @@ __all__ = [
     "_DEFAULT_CONCURRENCY",
     "_PROFILE_NAME_RE",
     "_STRATEGY_MEMORY_TTL",
+    "DdgsSearchProvider",
     "ResponseTooLarge",
     "SSRFError",
+    "SearchProvider",
     "_auth_message",
     "_auth_state",
     "_cache_path",

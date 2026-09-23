@@ -45,7 +45,7 @@ _MAX_TIMEOUT = 120
 
 def _clamp(name, value, lo, hi):
     """Reject out-of-range numeric input instead of silently accepting
-    abusive values (n=10**9, max_chars=10**9, timeout=-5)."""
+    abusive values (limit=10**9, max_chars=10**9, timeout=-5)."""
     if not isinstance(value, int):
         return f"{name} must be an integer"
     if value < lo or value > hi:
@@ -71,7 +71,12 @@ def _validate_profile(profile):
 
 
 @mcp.tool()
-async def search(query: str, n: int = 5, engine: str | None = None) -> dict:
+async def search(
+    query: str,
+    limit: int = 5,
+    engine: str | None = None,
+    n: int | None = None,
+) -> dict:
     """Search the web via the ddgs metasearch.
 
     Returns {"results": [...], "engine": ..., "requested_engine": ...,
@@ -85,14 +90,18 @@ async def search(query: str, n: int = 5, engine: str | None = None) -> dict:
     to another; check "failed_over". This matters for agents: the stderr
     warning is invisible over MCP, so this field is the only signal.
     """
-    err = _clamp("n", n, 1, _MAX_SEARCH_N)
+    # ``n`` was the MCP parameter before the CLI contract was standardized
+    # on ``limit``. Keep it as an explicit schema field so old clients do not
+    # fail FastMCP validation before this function can handle the request.
+    result_count = n if n is not None else limit
+    err = _clamp("n" if n is not None else "limit", result_count, 1, _MAX_SEARCH_N)
     if err:
         return {"error": err, "results": []}
     prov_fn = getattr(wg, "search_with_provenance", None)
     if prov_fn is not None:
-        results, prov = await asyncio.to_thread(prov_fn, query, n, engine)
+        results, prov = await asyncio.to_thread(prov_fn, query, result_count, engine)
     else:  # older shim without provenance support
-        results = await asyncio.to_thread(wg.search, query, n, engine)
+        results = await asyncio.to_thread(wg.search, query, result_count, engine)
         prov = {
             "requested": engine or "auto",
             "engine": engine or "auto",
@@ -211,14 +220,15 @@ async def fetch(
 @mcp.tool()
 async def search_fetch(
     query: str,
-    n: int = 3,
+    limit: int = 3,
     max_chars: int = 4000,
     timeout: int = 20,
     no_cache: bool = False,
     profile: str | None = None,
     engine: str | None = None,
+    n: int | None = None,
 ) -> dict:
-    """Search the web, then scrape the top n results in parallel.
+    """Search the web, then scrape the top ``limit`` results in parallel.
 
     Returns {"results": [...], "engine": ..., "requested_engine": ...,
     "failed_over": bool}. Each result entry has rank, search snippet, and
@@ -230,8 +240,9 @@ async def search_fetch(
     engine: None/auto = all ddgs engines, or a subset like
     "brave,duckduckgo". Unknown names degrade to auto.
     """
+    result_count = n if n is not None else limit
     for name, value, lo, hi in (
-        ("n", n, 1, _MAX_SEARCH_N),
+        ("n" if n is not None else "limit", result_count, 1, _MAX_SEARCH_N),
         ("max_chars", max_chars, 100, _MAX_MAX_CHARS),
         ("timeout", timeout, 1, _MAX_TIMEOUT),
     ):
@@ -244,9 +255,9 @@ async def search_fetch(
             return {"error": err, "results": []}
     prov_fn = getattr(wg, "search_with_provenance", None)
     if prov_fn is not None:
-        results, prov = await asyncio.to_thread(prov_fn, query, n, engine)
+        results, prov = await asyncio.to_thread(prov_fn, query, result_count, engine)
     else:
-        results = await asyncio.to_thread(wg.search, query, n, engine)
+        results = await asyncio.to_thread(wg.search, query, result_count, engine)
         prov = {
             "requested": engine or "auto",
             "engine": engine or "auto",
