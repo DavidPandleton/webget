@@ -58,7 +58,8 @@ jobs:
             --ignore=tests/test_mcp_metadata.py \
             --ignore=tests/test_browser_ssrf.py \
             --ignore=tests/test_mcp_engine.py \
-            --ignore=tests/test_mcp_provenance.py
+            --ignore=tests/test_mcp_provenance.py \
+            --ignore=tests/test_mcp_crawl.py
       - name: Assert the offline suite touches no network
         # A guard, not a test: if a future test reaches out, it fails here
         # with a clear message instead of flaking in CI months later.
@@ -76,7 +77,8 @@ jobs:
             --ignore=tests/test_mcp_metadata.py \
             --ignore=tests/test_browser_ssrf.py \
             --ignore=tests/test_mcp_engine.py \
-            --ignore=tests/test_mcp_provenance.py
+            --ignore=tests/test_mcp_provenance.py \
+            --ignore=tests/test_mcp_crawl.py
 
   mcp-test:
     runs-on: ubuntu-latest
@@ -103,6 +105,7 @@ jobs:
             tests/test_mcp_profile.py tests/test_login_flow.py \
             tests/test_mcp_map.py tests/test_mcp_metadata.py \
             tests/test_mcp_engine.py tests/test_mcp_provenance.py \
+            tests/test_mcp_crawl.py \
             -m "not live_network" -q
 
   network:
