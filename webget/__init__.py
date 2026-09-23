@@ -31,6 +31,7 @@ from .cache import (
 )
 from .cli import main, parse_opts
 from .discovery import discover_urls
+from .extraction import ExtractionResult, extract_structured
 from .firecrawl import fetch_firecrawl, firecrawl_key
 from .frontier import CrawlFrontier, FrontierItem, normalize_url
 from .http import (
@@ -109,6 +110,7 @@ __all__ = [
     "_STRATEGY_MEMORY_TTL",
     "CrawlFrontier",
     "DdgsSearchProvider",
+    "ExtractionResult",
     "FrontierItem",
     "ResponseTooLarge",
     "SSRFError",
@@ -153,6 +155,7 @@ __all__ = [
     "cache_get",
     "cache_put",
     "discover_urls",
+    "extract_structured",
     "fetch_firecrawl",
     "fetch_http",
     "firecrawl_key",
