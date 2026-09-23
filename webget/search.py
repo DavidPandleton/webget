@@ -45,8 +45,48 @@ class DdgsSearchProvider:
         return DDGS().text(query, max_results=max_results, **kwargs)
 
 
+class SearxngSearchProvider:
+    """Optional HTTP adapter for a configured SearXNG instance."""
+
+    def __init__(self, endpoint: str | None = None, *, timeout: float = 20.0):
+        self.endpoint = (endpoint or os.environ.get("WEBGET_SEARXNG_URL", "")).rstrip("/")
+        self.timeout = timeout
+        if not self.endpoint:
+            raise ValueError("SearXNG endpoint is required")
+
+    def known_engines(self) -> list[str]:
+        return ["searxng"]
+
+    def text(self, query: str, max_results: int, **kwargs) -> list[dict]:
+        import httpx
+
+        response = httpx.get(
+            f"{self.endpoint}/search",
+            params={"q": query, "format": "json", "categories": "general"},
+            timeout=self.timeout,
+            follow_redirects=False,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+            raise TypeError("SearXNG response has no results list")
+        rows = []
+        for item in payload["results"][:max_results]:
+            if not isinstance(item, dict) or not item.get("url"):
+                continue
+            rows.append(
+                {
+                    "title": item.get("title") or "",
+                    "href": item["url"],
+                    "body": item.get("content") or item.get("snippet") or "",
+                }
+            )
+        return rows
+
+
 def _default_provider() -> SearchProvider:
     return DdgsSearchProvider()
+
 
 # Failover is bounded by TIME, not by a count of attempts.
 #
@@ -155,7 +195,7 @@ def _failover_chain(first, provider: SearchProvider | None = None):
     Returns [] when the registry is unavailable, in which case there is
     nothing to fail over to and the original error propagates.
     """
-    known = known_engines()
+    known = provider.known_engines() if provider is not None else known_engines()
     if not known:
         return []
     tried = {e.strip() for e in str(first or "").split(",") if e.strip()}

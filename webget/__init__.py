@@ -84,6 +84,7 @@ from .profile import (
 from .search import (
     DdgsSearchProvider,
     SearchProvider,
+    SearxngSearchProvider,
     _read_json,
     _write_json,
     search,
@@ -116,6 +117,7 @@ __all__ = [
     "ResponseTooLarge",
     "SSRFError",
     "SearchProvider",
+    "SearxngSearchProvider",
     "_auth_message",
     "_auth_state",
     "_cache_path",
