@@ -3,6 +3,32 @@
 All notable changes to webget are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
 
+## [0.16.0] - 2026-09-24
+
+### Added
+- SQLite-backed resumable crawler with URL deduplication, same-domain policy,
+  depth/page budgets, durable page persistence, and stale lease recovery.
+- `webget crawl URL DB` CLI command and MCP `crawl` tool with bounded validation
+  and JSON output.
+- Dependency-light structured extraction primitives for JSON-LD and HTML tables,
+  with explicit success, incomplete, and error states.
+- Search-provider seam plus optional HTTP `SearxngSearchProvider`; SearXNG is
+  configured externally through `WEBGET_SEARXNG_URL` and is not bundled.
+
+### Fixed
+- RSS/Atom feed titles and descriptions no longer break generated Markdown when
+  feed text contains newlines.
+- Feed descriptions are truncated at word boundaries instead of cutting words
+  in half.
+- Packaging metadata now uses the modern SPDX license form without setuptools
+  deprecation warnings.
+- CI routes MCP-dependent crawl tests to the MCP job instead of collecting them
+  in the no-MCP offline job.
+
+### Verification
+- Full offline suite, Ruff, wheel/sdist build, clean Python 3.11 install,
+  MCP stdio smoke, and GitHub Actions CI pass.
+
 ## [Unreleased]
 
 ### Fixed
