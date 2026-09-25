@@ -336,7 +336,8 @@ async def fetch_http(url, max_chars, cookies=None, headers=None, timeout=15):
             for c in cookies:
                 d = (c.get("domain") or "").lstrip(".").lower()
                 if d and (host == d or host.endswith("." + d)):
-                    exp = c.get("expires") or -1
+                    exp = c.get("expires")
+                    exp = -1 if exp is None else exp
                     # Skip expired cookies: session cookies (expires<0) and
                     # future-expiry cookies are sent; past-expiry are not.
                     if 0 <= exp < now:

@@ -3,6 +3,18 @@
 All notable changes to webget are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
 
+## [0.16.1] - 2026-09-25
+
+### Fixed
+- Netscape cookie files: `#HttpOnly_`-prefixed lines were treated as comments
+  and skipped, so HttpOnly cookies were never loaded. The prefix is now
+  stripped before the comment check and such cookies are marked
+  `httpOnly=True`.
+- HTTP fast path: a cookie with `expires == 0` was coerced to `-1` by
+  `expires or -1`, so an already-expired cookie looked like a non-expiring
+  session cookie and was still sent. Session cookies are represented by a
+  missing `expires` or `-1`, never `0`.
+
 ## [0.16.0] - 2026-09-24
 
 ### Added

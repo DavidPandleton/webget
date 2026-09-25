@@ -58,6 +58,9 @@ def parse_cookie_file(path):
     with open(os.path.expanduser(path)) as f:
         for line in f:
             line = line.strip()
+            http_only = line.startswith("#HttpOnly_")
+            if http_only:
+                line = line[len("#HttpOnly_") :]
             if not line or line.startswith("#"):
                 continue
             parts = line.split("\t")
@@ -70,7 +73,7 @@ def parse_cookie_file(path):
                 "domain": domain,
                 "path": path_,
                 "secure": secure == "TRUE",
-                "httpOnly": False,
+                "httpOnly": http_only,
             }
             if expires not in ("0", "Session", ""):
                 try:

@@ -49,6 +49,29 @@ class TestParseOpts:
         assert r2 == ["u", "https://x.com"]
         assert c2 is not None
 
+    def test_cookies_httponly_prefix_is_parsed(self, tmp_path):
+        """Netscape HttpOnly lines start with '#HttpOnly_' and must be parsed.
+
+        The parser skips any line starting with '#', so without stripping the
+        prefix those cookies would be silently dropped.
+        """
+        ck = tmp_path / "ck.txt"
+        ck.write_text(
+            "# Netscape HTTP Cookie File\n"
+            "#HttpOnly_.x.com\tTRUE\t/\tFALSE\t0\ts\tv\n"
+        )
+        _, c1, *_ = opts("-c", str(ck), "u", "https://x.com")
+        assert c1 is not None and len(c1) == 1
+        assert c1[0]["name"] == "s" and c1[0]["httpOnly"] is True
+        # a real comment line is still ignored
+        ck.write_text(
+            "# Netscape HTTP Cookie File\n"
+            "# a comment\n"
+            "#HttpOnly_.x.com\tTRUE\t/\tFALSE\t0\ts\tv\n"
+        )
+        _, c2, *_ = opts("-c", str(ck), "u", "https://x.com")
+        assert c2 is not None and len(c2) == 1 and c2[0]["httpOnly"] is True
+
     def test_max_chars_aliases(self):
         _, _, _, mc1, *_ = opts("-n", "500", "u", "https://x.com")
         _, _, _, mc2, *_ = opts("--max-chars", "500", "u", "https://x.com")

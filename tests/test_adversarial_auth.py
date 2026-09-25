@@ -128,6 +128,26 @@ class TestSessionReuse:
         res = asyncio.run(_fetch(server.url("/cookie-gated"), cookies=ck))
         assert _one(res)["status"] == "success"
 
+    def test_epoch_zero_cookie_is_expired_not_session(self, fresh_cache, isolated_env):
+        """expires == 0 is an already-expired cookie (epoch 1970), not a session.
+
+        The old jar build used ``expires or -1``, which turned an explicit 0
+        into -1 and made the cookie look like a non-expiring session cookie, so
+        an expired cookie was still sent. Session cookies are represented by a
+        missing expires or -1 (see profile.py), never by 0.
+        """
+        server = fresh_cache
+        ck = [_cookie("session", server.host, expires=0)]
+        res = asyncio.run(_fetch(server.url("/cookie-gated"), cookies=ck))
+        assert _one(res)["status"] == "blocked"
+
+    def test_absent_expiry_is_a_session_cookie(self, fresh_cache, isolated_env):
+        """A cookie with no `expires` key is a session cookie and IS sent."""
+        server = fresh_cache
+        ck = [{"name": "session", "value": "v", "domain": server.host, "path": "/"}]
+        res = asyncio.run(_fetch(server.url("/cookie-gated"), cookies=ck))
+        assert _one(res)["status"] == "success"
+
 
 class TestProfileMeta:
     def test_corrupt_state_reports_corrupt(self, isolated_env):
