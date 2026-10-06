@@ -127,8 +127,14 @@ def _auth_state(result, profile):
     )
     # Situs seperti SION memakai JS show/hide alih-alih type=password dan
     # memberi label kolom "NIM" / "Username". Deteksi label kredensial.
-    has_credential_labels = "password" in text and any(
-        w in text for w in ("nim", "username", "user id", "email")
+    #
+    # 2026-10-06: kedua sisi match sebagai KATA UTUH. Substring mentah
+    # false-positive di portal kampus sungguhan (Moodle yang sudah login):
+    # config JS memuat "moodle-form-passwordunmask" (mengandung "password")
+    # dan daftar requires memuat "anim" (mengandung "nim"), sehingga sesi
+    # yang SEHAT dilaporkan login_required.
+    has_credential_labels = bool(_re.search(r"\bpassword\b", text)) and bool(
+        _re.search(r"\b(?:nim|username|user id|email)\b", text)
     )
     has_show_password = "show password" in text
     if status == 401:

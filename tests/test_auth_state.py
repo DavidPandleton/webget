@@ -185,3 +185,34 @@ class TestHalamanPublikNormal:
         state, auth = _auth_state(_hasil(ISI, "<p>a</p>"), None)
         assert state == "success"
         assert auth is None
+
+
+class TestLabelKredensialKataUtuh:
+    """Perbaikan 2026-10-06: label kredensial juga match sebagai kata utuh.
+
+    Ditemukan di portal kampus sungguhan (Moodle yang SUDAH login): config
+    JS memuat \"moodle-form-passwordunmask\" (mengandung \"password\") dan
+    daftar requires memuat \"anim\" (mengandung \"nim\"), sehingga sesi
+    portal yang SEHAT dilaporkan login_required. Pengguna lalu mengejar
+    masalah sesi yang tidak ada. Sumber: fetch nyata ke course page Moodle.
+    """
+
+    def test_config_js_moodle_bukan_login(self):
+        html = (
+            "<script>M.str = {"
+            '"moodle-form-passwordunmask":{"requires":[]},'
+            '"moodle-course-dragdrop":{"requires":["node","anim"]}};</script>'
+        )
+        state, _ = _auth_state(_hasil(ISI, html), None)
+        assert state == "success"
+
+    def test_minimum_bukan_nim(self):
+        """Kata utuh: 'nim' di dalam 'minimum' bukan label kredensial."""
+        state, _ = _auth_state(
+            _hasil(
+                f"Reset password dimulai di sini. Minimum 8 karakter. {ISI}",
+                "<p>a</p>",
+            ),
+            None,
+        )
+        assert state == "success"
