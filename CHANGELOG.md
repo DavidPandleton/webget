@@ -53,6 +53,12 @@ All notable changes to webget are documented here. Format follows
   a `statusCode` of `Infinity` (which `json.loads` accepts) no longer raises
   `OverflowError`. The `Infinity` path was found by an independent oc-fleet
   review.
+- Auth classifier: the credential-label check (`password` plus a
+  NIM/username/email label) matched raw substrings, so an authenticated
+  Moodle page was reported `login_required`: its inline JS config contains
+  `moodle-form-passwordunmask` (substring `password`) and module requires
+  lists contain `anim` (substring `nim`). Both sides now match as whole
+  words; SION-style NIM/Username login-page detection is unchanged.
 
 ## [0.15.0] - 2026-09-21
 
