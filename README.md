@@ -472,7 +472,8 @@ make test       # pytest (pure logic, no network needed)
 make lint       # ruff
 ```
 
-- Single-file Python (`webget_cli.py`), no build step, runs via `uv run`.
+- Pure Python package (`webget/`), no build step. `webget_cli.py` stays as a
+  compatibility shim for existing `import webget_cli` callers.
 - Lazy imports: `--strategy http` never pays the Crawl4AI import cost.
 - Crawl4AI 0.9.2's `export_storage_state()` is broken (wrong attribute), so
   webget works around it by reaching into `browser_manager` directly.
