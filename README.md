@@ -33,7 +33,7 @@ FETCH_AUTO
 Every fetch classifies what it hit - `success`, `login_required`, `challenge`,
 `blocked`, or `error` - and reports it in machine-readable JSON. webget never
 pretends an empty page is success, and it never solves CAPTCHAs or evades
-anti-bot systems; it tells you honestly what happened.
+anti-bot systems. It tells you honestly what happened.
 
 ## Install
 
@@ -41,7 +41,7 @@ Requires Python 3.11+.
 
 ### PyPI (`webget-cli`)
 
-The CLI command is `webget`; the PyPI package name is `webget-cli`
+The CLI command is `webget`, and the PyPI package name is `webget-cli`
 (the bare `webget` name is taken by an unrelated package).
 
 ```bash
@@ -67,7 +67,7 @@ webget --help
 ### Browser runtime (optional)
 
 Crawl4AI drives a Playwright browser. `pip install "webget-cli[browser]"`
-installs the Python packages; the browser binary itself is downloaded
+installs the Python packages. The browser binary itself is downloaded
 separately:
 
 ```bash
@@ -154,7 +154,7 @@ bounded timeout.
 ## Search engines
 
 webget searches through `ddgs`, a metasearch library that aggregates several
-keyless engines. The default `auto` queries all of them; naming a subset is
+keyless engines. The default `auto` queries all of them. Naming a subset is
 faster and skips engines that are having a bad hour.
 
 ```bash
@@ -198,7 +198,7 @@ results, provenance = search_with_provenance(
 
 The adapter calls `/search?format=json`, normalizes result fields, and keeps
 the usual per-call provenance. Live availability depends on the configured
-SearXNG instance; the core package does not start one.
+SearXNG instance. The core package does not start one.
 
 **Failover is automatic.** If the engine you named fails, or returns zero
 results, webget tries the remaining engines until a time budget is spent
@@ -242,7 +242,7 @@ are tried best-first by that record instead of in registry order. The ledger
 is advisory - it reorders candidates, it never removes one - and it decays:
 an engine marked dead last week is retried with no penalty this week, because
 the blocking that made it dead is exactly what changes. There is no baked-in
-ranking anywhere in the source; the same webget learns a different order on
+ranking anywhere in the source. The same webget learns a different order on
 your machine than on the author's, which is the point.
 
 Diagnostics: `python -c "from webget import health; print(health.health_snapshot())"`
@@ -292,7 +292,7 @@ webget logout https://campus.example --profile campus
 `webget login` never stores passwords and never fills forms. A visible
 browser opens, you authenticate yourself, then press Enter in the terminal and
 webget persists the session. Persistent profiles live in
-`~/.local/share/webget/profiles/<name>`; session cookies are exported to
+`~/.local/share/webget/profiles/<name>`. Session cookies are exported to
 `storage_state.json` inside the profile after each browser run, so the fast
 path can reuse them. Secrets are never printed.
 
@@ -324,7 +324,7 @@ path can reuse them. Secrets are never printed.
 ```
 
 `metadata` (author, published date, site name, language) comes from
-trafilatura extraction on the HTTP path; values are `null` when unknown
+trafilatura extraction on the HTTP path. Values are `null` when unknown
 or when the winning strategy was not HTTP.
 
 Status values: `success | login_required | challenge | blocked | error`.
@@ -449,7 +449,7 @@ Then the agent can discover sessions and fetch authenticated pages:
   human can log in), navigates to `url`, and persists the session once the
   login handshake's cookies appear (or after `wait_seconds`, whichever
   comes first). MCP stdin is the JSON-RPC stream, so there is no Enter
-  keypress; the flow polls for cookies instead.
+  keypress. The flow polls for cookies instead.
 - `fetch(..., profile="portal")` / `search_fetch(..., profile="portal")` -
   scrape using that session.
 
@@ -474,7 +474,7 @@ make lint       # ruff
 
 - Single-file Python (`webget_cli.py`), no build step, runs via `uv run`.
 - Lazy imports: `--strategy http` never pays the Crawl4AI import cost.
-- Crawl4AI 0.9.2's `export_storage_state()` is broken (wrong attribute);
+- Crawl4AI 0.9.2's `export_storage_state()` is broken (wrong attribute), so
   webget works around it by reaching into `browser_manager` directly.
 
 ## Contributing
@@ -487,4 +487,4 @@ Found a bug or have an idea? [Open an issue](https://github.com/DavidPandleton/w
 
 Note: dependency licenses are separate (e.g. certifi MPL-2.0, tqdm
 MPL-2.0 AND MIT, scipy's bundled GCC-runtime GPL-with-exception via the
-browser extra); each dependency keeps its own license/notice.
+browser extra). Each dependency keeps its own license/notice.
