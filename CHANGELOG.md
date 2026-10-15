@@ -3,6 +3,16 @@
 All notable changes to webget are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and [SemVer](https://semver.org/).
 
+## [0.16.2] - 2026-10-16
+
+### Added
+- External subcommand plugin dispatcher: unknown subcommands (`webget <name>`)
+  delegate to `webget-<name>` found in `$PATH` or `~/.local/share/webget/plugins/`
+  using the Git/Cargo plugin pattern.
+- `webget plugins` CLI command to list all discovered external plugins.
+- High-level Python library client: `webget.Client`, `webget.FetchResult`, and
+  `webget.fetch` exported from the package for in-process programmatic usage.
+
 ## [0.16.1] - 2026-09-25
 
 ### Fixed
