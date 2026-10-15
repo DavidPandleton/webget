@@ -40,8 +40,10 @@ __doc__ = (
     "  webget profiles [--json]       List profiles and session status\n"
     "  webget logout URL --profile X  Clear auth for one domain, keep the rest\n"
     "  webget doctor [--json]         Show which browsers/tools are usable here\n"
+    "  webget plugins [--json]        List discovered external plugin commands\n"
     "  webget map URL [--limit N]     Discover URLs via sitemaps and robots.txt\n"
     "  webget crawl URL DB [--limit N] Bounded resumable crawl to SQLite\n"
+    "  webget <subcommand> [args]     Execute external plugin (webget-<subcommand> in PATH)\n"
     "Aliases: search = s, fetch = u, search-fetch = su\n"
     "\n"
     "Options:\n"
@@ -393,6 +395,26 @@ def cmd_doctor(json_out=False):
     print("\n" + "=" * 60)
 
 
+def cmd_plugins(json_out=False):
+    from .plugin import list_plugins
+
+    plugins = list_plugins()
+    if json_out:
+        print(json.dumps(plugins, indent=2))
+        return
+
+    if not plugins:
+        print("No external webget plugins found.")
+        print(
+            "Install executable plugins in $PATH as 'webget-<name>' or in ~/.local/share/webget/plugins/"
+        )
+        return
+
+    print("Discovered webget plugins:")
+    for p in plugins:
+        print(f"  {p['name']:<15} {p['path']}")
+
+
 def main():
     args = sys.argv[1:]
     if not args or args[0] in ("-h", "--help"):
@@ -498,9 +520,7 @@ def main():
         except (TypeError, ValueError):
             # ValueError naik ke pembungkus di main(); lihat komentar di sana
             # soal mengapa traceback tidak boleh sampai ke pengguna.
-            raise ValueError(
-                f"result count expects a whole number, got {remaining[2]!r}"
-            ) from None
+            raise ValueError(f"result count expects a whole number, got {remaining[2]!r}") from None
         if n < 1:
             raise ValueError(f"result count must be >= 1, got {n}")
         # Batas atas disamakan dengan MCP (_MAX_SEARCH_N = 50). Tanpa ini,
@@ -582,10 +602,15 @@ def _jalankan_perintah(
         if json_out:
             print(json.dumps(result, indent=2, ensure_ascii=False))
         else:
-            print(f"done={result['stats'].get('done', 0)} failed={result['stats'].get('failed', 0)}")
+            print(
+                f"done={result['stats'].get('done', 0)} failed={result['stats'].get('failed', 0)}"
+            )
         return
     elif cmd == "profiles":
         cmd_profiles(json_out)
+        return
+    elif cmd == "plugins":
+        cmd_plugins(json_out)
         return
     elif cmd == "doctor":
         cmd_doctor(json_out)
@@ -748,7 +773,19 @@ def _jalankan_perintah(
             print(got.get("markdown", "") if not fail else "(no content)")
 
     else:
+        from .plugin import dispatch_plugin, find_plugin, list_plugins
+
+        if find_plugin(cmd):
+            dispatch_plugin(cmd, sys.argv[2:])
+            return
+
         print("Unknown command:", cmd)
+        plugins = list_plugins()
+        if plugins:
+            names = ", ".join(p["name"] for p in plugins)
+            print(f"Available plugins: {names}")
+            print("Run 'webget <plugin> ...' to execute.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

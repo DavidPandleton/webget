@@ -30,6 +30,7 @@ from .cache import (
     parse_headers,
 )
 from .cli import main, parse_opts
+from .client import Client, FetchResult, fetch
 from .crawler import crawl_site
 from .discovery import discover_urls
 from .extraction import ExtractionResult, extract_structured
@@ -58,6 +59,7 @@ from .ladder import (
     _terminal_state,
     scrape_many,
 )
+from .plugin import dispatch_plugin, find_plugin, list_plugins
 from .profile import (
     _PROFILE_NAME_RE,
     PROFILE_DIR,
@@ -110,9 +112,11 @@ __all__ = [
     "_DEFAULT_CONCURRENCY",
     "_PROFILE_NAME_RE",
     "_STRATEGY_MEMORY_TTL",
+    "Client",
     "CrawlFrontier",
     "DdgsSearchProvider",
     "ExtractionResult",
+    "FetchResult",
     "FrontierItem",
     "ResponseTooLarge",
     "SSRFError",
@@ -159,10 +163,14 @@ __all__ = [
     "cache_put",
     "crawl_site",
     "discover_urls",
+    "dispatch_plugin",
     "extract_structured",
+    "fetch",
     "fetch_firecrawl",
     "fetch_http",
+    "find_plugin",
     "firecrawl_key",
+    "list_plugins",
     "list_profiles",
     "load_profile_cookies",
     "main",
